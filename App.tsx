@@ -3,7 +3,7 @@ import Graph3D from './components/Graph3D';
 import { INITIAL_DATA } from './constants';
 import { GraphData, GraphNode, GraphLink } from './types';
 import { expandNetwork } from './services/geminiService';
-import { Sparkles, Loader2, X as XIcon, ExternalLink, User, Building2, Link2, ChevronLeft, ChevronRight, Menu, Calendar, BadgeCheck } from 'lucide-react';
+import { Sparkles, Loader2, X as XIcon, ExternalLink, User, Building2, Link2, ChevronLeft, ChevronRight, Menu, Calendar, BadgeCheck, MapPin } from 'lucide-react';
 
 export default function App() {
   const [data, setData] = useState<GraphData>(INITIAL_DATA);
@@ -15,10 +15,10 @@ export default function App() {
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
   const [selectedLink, setSelectedLink] = useState<GraphLink | null>(null);
 
-  // 1. Calculate Statistics & Sort Nodes by Influence (Degree)
+  // 1. Calculate Statistics & Sort Nodes by Followers (or connections as fallback)
   const sortedNodes = useMemo(() => {
     const counts = new Map<string, number>();
-    
+
     // Count connections for each node ID
     data.links.forEach(link => {
         const s = typeof link.source === 'object' ? (link.source as any).id : link.source;
@@ -27,11 +27,11 @@ export default function App() {
         counts.set(t, (counts.get(t) || 0) + 1);
     });
 
-    // Attach count to node copy and sort
+    // Attach count to node copy and sort by followers (or connections as fallback)
     return [...data.nodes].map(node => ({
         ...node,
         val: counts.get(node.id) || 0
-    })).sort((a, b) => (b.val || 0) - (a.val || 0));
+    })).sort((a, b) => (b.followers || b.val || 0) - (a.followers || a.val || 0));
 
   }, [data]);
 
@@ -121,6 +121,13 @@ export default function App() {
     }
   };
 
+  const formatNumber = (num: number | undefined): string => {
+    if (!num) return '0';
+    if (num >= 1000000) return `${(num / 1000000).toFixed(1)}M`;
+    if (num >= 1000) return `${(num / 1000).toFixed(1)}K`;
+    return num.toString();
+  };
+
   return (
     <div className="w-full h-screen relative overflow-hidden bg-[#0B0C15] text-white font-sans">
       
@@ -160,8 +167,18 @@ export default function App() {
                             <div className={`text-sm font-semibold truncate ${isSelected ? 'text-white' : 'text-slate-200'}`}>
                                 {node.name}
                             </div>
-                            <div className="text-[10px] text-slate-500 uppercase tracking-wider truncate">
-                                {node.val} Connections
+                            {node.handle && (
+                                <div className="text-xs text-slate-400 font-mono truncate">
+                                    @{node.handle}
+                                </div>
+                            )}
+                            {node.role && (
+                                <div className="text-xs text-slate-500 truncate mt-0.5">
+                                    {node.role}{node.associated && node.associated !== node.name ? ` @ ${node.associated}` : ''}
+                                </div>
+                            )}
+                            <div className="text-[10px] text-slate-600 mt-1">
+                                {node.followers ? `${(node.followers / 1000000).toFixed(1)}M followers` : `${node.val} connections`}
                             </div>
                         </div>
                         {isSelected && <ChevronRight className="w-4 h-4 text-indigo-400" />}
@@ -193,126 +210,248 @@ export default function App() {
             {/* Content Cards */}
             {selectedNode && (
                 <>
-                {/* Main Profile Card */}
-                <div className="bg-[#090A10]/95 backdrop-blur-xl border border-white/10 rounded-2xl p-6 shadow-2xl pointer-events-auto relative overflow-hidden group">
-                     {/* Gradient Glow */}
-                    <div className="absolute -top-20 -right-20 w-64 h-64 bg-indigo-500/10 rounded-full blur-3xl group-hover:bg-indigo-500/20 transition-colors duration-500 pointer-events-none" />
-                    
-                    {/* Internal Close Button */}
-                    <button 
+                {/* Main Profile Card - X Style */}
+                <div className="bg-[#090A10]/95 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl pointer-events-auto relative overflow-hidden group">
+
+                    {/* Header Banner */}
+                    <div className="h-24 bg-gradient-to-br from-indigo-900/50 via-slate-800/50 to-purple-900/30 relative">
+                        <div className="absolute inset-0 bg-gradient-to-t from-[#090A10]/80 to-transparent" />
+                    </div>
+
+                    {/* Close Button */}
+                    <button
                         onClick={closeSelection}
-                        className="absolute top-4 right-4 p-2 bg-black/20 hover:bg-white/10 rounded-full text-slate-400 hover:text-white transition-colors z-20 backdrop-blur-md"
+                        className="absolute top-3 right-3 p-1.5 bg-black/40 hover:bg-black/60 rounded-full text-white/80 hover:text-white transition-colors z-20 backdrop-blur-sm"
                     >
                         <XIcon className="w-4 h-4" />
                     </button>
 
-                    <div className="relative z-10">
-                        {/* Avatar & Ident Header */}
-                        <div className="flex items-start gap-4 mb-5 pr-8">
-                            <div className="relative shrink-0">
-                                <img 
-                                    src={getProfileImage(selectedNode)} 
+                    {/* Profile Section */}
+                    <div className="px-4 pb-4 relative">
+                        {/* Avatar - Overlapping Header */}
+                        <div className="flex justify-between items-start">
+                            <div className="relative -mt-12 mb-3">
+                                <img
+                                    src={getProfileImage(selectedNode)}
                                     alt={selectedNode.name}
                                     onError={handleImageError}
-                                    className="w-16 h-16 rounded-full border-2 border-white/10 object-cover bg-slate-800 shadow-lg"
+                                    className="w-20 h-20 rounded-full border-4 border-[#090A10] object-cover bg-slate-800 shadow-lg"
                                 />
                                 {selectedNode.group === 'company' && (
-                                    <div className="absolute -bottom-1 -right-1 bg-black rounded-full p-0.5">
+                                    <div className="absolute -bottom-1 -right-1 bg-[#090A10] rounded-full p-1">
                                         <Building2 className="w-4 h-4 text-amber-400" />
                                     </div>
                                 )}
                             </div>
-                            
-                            <div className="flex-1 min-w-0 pt-1">
-                                <h2 className="text-xl font-display font-bold text-white tracking-tight flex items-center gap-1.5 truncate">
-                                    {selectedNode.name}
-                                    {selectedNode.verified === 'gold' && <BadgeCheck className="w-4 h-4 text-amber-400 fill-amber-400/10" />}
-                                    {selectedNode.verified === 'blue' && <BadgeCheck className="w-4 h-4 text-blue-400 fill-blue-400/10" />}
-                                </h2>
-                                <div className="text-sm text-slate-400 font-mono">@{selectedNode.handle}</div>
-                                
-                                {selectedNode.joinedDate && (
-                                    <div className="flex items-center gap-1.5 mt-1.5 text-[10px] text-slate-500 uppercase tracking-wide">
-                                        <Calendar className="w-3 h-3" />
-                                        <span>Joined {selectedNode.joinedDate}</span>
-                                    </div>
-                                )}
-                            </div>
-                        </div>
 
-                        {/* Bio / Role */}
-                        <div className="mb-6">
-                            <div className="text-sm font-medium text-white mb-2">
-                                {selectedNode.role}
-                                {selectedNode.associated && <span className="text-indigo-300"> @ {selectedNode.associated}</span>}
-                            </div>
-                            {selectedNode.bio && (
-                                <p className="text-sm text-slate-400 leading-relaxed">
-                                    {selectedNode.bio}
-                                </p>
+                            {/* Follow Button */}
+                            {selectedNode.handle && (
+                                <a
+                                    href={`https://x.com/${selectedNode.handle}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="mt-3 px-5 py-2 bg-white hover:bg-white/90 text-black font-bold text-sm rounded-full transition-all"
+                                >
+                                    Follow
+                                </a>
                             )}
                         </div>
 
-                        {/* Actions */}
-                        {selectedNode.handle && (
-                            <a 
-                                href={`https://x.com/${selectedNode.handle}`} 
-                                target="_blank" 
-                                rel="noopener noreferrer"
-                                className="flex items-center justify-center gap-2 w-full py-2.5 bg-white/5 hover:bg-white/10 hover:border-white/20 border border-white/10 text-white font-medium text-sm rounded-xl transition-all group/btn"
-                            >
-                                <span>View X Profile</span>
-                                <ExternalLink className="w-3 h-3 group-hover/btn:translate-x-0.5 transition-transform text-slate-400 group-hover/btn:text-white" />
-                            </a>
+                        {/* Name & Handle */}
+                        <div className="mb-3">
+                            <h2 className="text-xl font-bold text-white flex items-center gap-1.5">
+                                {selectedNode.name}
+                                {selectedNode.verified === 'gold' && <BadgeCheck className="w-5 h-5 text-amber-400 fill-amber-400/20" />}
+                                {selectedNode.verified === 'blue' && <BadgeCheck className="w-5 h-5 text-blue-400 fill-blue-400/20" />}
+                            </h2>
+                            <div className="text-slate-500 text-sm">@{selectedNode.handle}</div>
+                        </div>
+
+                        {/* Bio */}
+                        {(selectedNode.bio || selectedNode.role) && (
+                            <p className="text-sm text-slate-200 leading-relaxed mb-3">
+                                {selectedNode.bio || `${selectedNode.role}${selectedNode.associated ? ` @ ${selectedNode.associated}` : ''}`}
+                            </p>
+                        )}
+
+                        {/* Meta Info Row: Location, Website, Joined */}
+                        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-500 mb-4">
+                            {selectedNode.location && (
+                                <div className="flex items-center gap-1">
+                                    <MapPin className="w-4 h-4" />
+                                    <span>{selectedNode.location}</span>
+                                </div>
+                            )}
+                            {selectedNode.website && (
+                                <a
+                                    href={`https://${selectedNode.website}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="flex items-center gap-1 text-indigo-400 hover:underline"
+                                >
+                                    <Link2 className="w-4 h-4" />
+                                    <span>{selectedNode.website}</span>
+                                </a>
+                            )}
+                            {selectedNode.joinedDate && (
+                                <div className="flex items-center gap-1">
+                                    <Calendar className="w-4 h-4" />
+                                    <span>Joined {selectedNode.joinedDate}</span>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Following / Followers */}
+                        {(selectedNode.followers || selectedNode.following) && (
+                            <div className="flex gap-4 text-sm">
+                                {selectedNode.following !== undefined && (
+                                    <div>
+                                        <span className="font-bold text-white">{formatNumber(selectedNode.following)}</span>
+                                        <span className="text-slate-500 ml-1">Following</span>
+                                    </div>
+                                )}
+                                {selectedNode.followers !== undefined && (
+                                    <div>
+                                        <span className="font-bold text-white">{formatNumber(selectedNode.followers)}</span>
+                                        <span className="text-slate-500 ml-1">Followers</span>
+                                    </div>
+                                )}
+                            </div>
                         )}
                     </div>
                 </div>
                 </>
             )}
 
-            {selectedLink && (
-                <div className="bg-[#090A10]/90 backdrop-blur-xl border border-white/10 rounded-2xl p-6 shadow-2xl pointer-events-auto relative">
-                     {/* Internal Close Button for Link Card */}
-                     <button 
-                        onClick={closeSelection}
-                        className="absolute top-4 right-4 p-2 bg-black/20 hover:bg-white/10 rounded-full text-slate-400 hover:text-white transition-colors z-20 backdrop-blur-md"
-                    >
-                        <XIcon className="w-4 h-4" />
-                    </button>
+            {selectedLink && (() => {
+                const sourceNode = resolveNode(selectedLink.source as string | GraphNode);
+                const targetNode = resolveNode(selectedLink.target as string | GraphNode);
 
-                     <div className="flex items-center gap-2 mb-6 text-amber-400">
-                        <Link2 className="w-4 h-4" />
-                        <span className="text-xs font-bold uppercase tracking-widest">Active Connection</span>
-                     </div>
-                     
-                     <div className="space-y-4 relative">
-                        {/* Connecting Line */}
-                        <div className="absolute left-[19px] top-10 bottom-10 w-0.5 bg-gradient-to-b from-transparent via-white/10 to-transparent"></div>
+                const renderNodeCard = (node: GraphNode | undefined, label: string) => {
+                    if (!node) return null;
+                    return (
+                        <div className="bg-[#090A10]/95 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl pointer-events-auto relative overflow-hidden group">
 
-                        {/* Source */}
-                        <div className="flex items-center gap-4">
-                             <div className="w-10 h-10 rounded-full bg-slate-800 border border-white/10 flex items-center justify-center shrink-0 z-10">
-                                <span className="text-xs font-bold text-slate-400">A</span>
-                             </div>
-                             <div className="flex-1 min-w-0">
-                                <span className="text-[10px] text-slate-500 uppercase block mb-0.5">Source</span>
-                                <div className="font-bold text-white truncate">{typeof selectedLink.source === 'object' ? (selectedLink.source as any).name : selectedLink.source}</div>
-                             </div>
+                            {/* Header Banner */}
+                            <div className="h-20 bg-gradient-to-br from-indigo-900/50 via-slate-800/50 to-purple-900/30 relative">
+                                <div className="absolute inset-0 bg-gradient-to-t from-[#090A10]/80 to-transparent" />
+                            </div>
+
+                            {/* Close Button */}
+                            <button
+                                onClick={closeSelection}
+                                className="absolute top-3 right-3 p-1.5 bg-black/40 hover:bg-black/60 rounded-full text-white/80 hover:text-white transition-colors z-20 backdrop-blur-sm"
+                            >
+                                <XIcon className="w-4 h-4" />
+                            </button>
+
+                            {/* Profile Section */}
+                            <div className="px-4 pb-4 relative">
+                                {/* Avatar - Overlapping Header */}
+                                <div className="flex justify-between items-start">
+                                    <div className="relative -mt-10 mb-2">
+                                        <img
+                                            src={getProfileImage(node)}
+                                            alt={node.name}
+                                            onError={(e) => {
+                                                e.currentTarget.onerror = null;
+                                                e.currentTarget.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(node.name)}&background=1e293b&color=cbd5e1&size=128`;
+                                            }}
+                                            className="w-16 h-16 rounded-full border-4 border-[#090A10] object-cover bg-slate-800 shadow-lg"
+                                        />
+                                        {node.group === 'company' && (
+                                            <div className="absolute -bottom-1 -right-1 bg-[#090A10] rounded-full p-1">
+                                                <Building2 className="w-3 h-3 text-amber-400" />
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* Follow Button */}
+                                    {node.handle && (
+                                        <a
+                                            href={`https://x.com/${node.handle}`}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="mt-2 px-4 py-1.5 bg-white hover:bg-white/90 text-black font-bold text-sm rounded-full transition-all"
+                                        >
+                                            Follow
+                                        </a>
+                                    )}
+                                </div>
+
+                                {/* Name & Handle */}
+                                <div className="mb-2">
+                                    <h2 className="text-lg font-bold text-white flex items-center gap-1.5">
+                                        {node.name}
+                                        {node.verified === 'gold' && <BadgeCheck className="w-4 h-4 text-amber-400 fill-amber-400/20" />}
+                                        {node.verified === 'blue' && <BadgeCheck className="w-4 h-4 text-blue-400 fill-blue-400/20" />}
+                                    </h2>
+                                    <div className="text-slate-500 text-sm">@{node.handle}</div>
+                                </div>
+
+                                {/* Bio */}
+                                {(node.bio || node.role) && (
+                                    <p className="text-sm text-slate-200 leading-relaxed mb-2">
+                                        {node.bio || `${node.role}${node.associated ? ` @ ${node.associated}` : ''}`}
+                                    </p>
+                                )}
+
+                                {/* Meta Info Row */}
+                                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500 mb-3">
+                                    {node.location && (
+                                        <div className="flex items-center gap-1">
+                                            <MapPin className="w-3 h-3" />
+                                            <span>{node.location}</span>
+                                        </div>
+                                    )}
+                                    {node.website && (
+                                        <a
+                                            href={`https://${node.website}`}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="flex items-center gap-1 text-indigo-400 hover:underline"
+                                        >
+                                            <Link2 className="w-3 h-3" />
+                                            <span>{node.website}</span>
+                                        </a>
+                                    )}
+                                    {node.joinedDate && (
+                                        <div className="flex items-center gap-1">
+                                            <Calendar className="w-3 h-3" />
+                                            <span>Joined {node.joinedDate}</span>
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Following / Followers */}
+                                {(node.followers || node.following) && (
+                                    <div className="flex gap-4 text-sm">
+                                        {node.following !== undefined && (
+                                            <div>
+                                                <span className="font-bold text-white">{formatNumber(node.following)}</span>
+                                                <span className="text-slate-500 ml-1">Following</span>
+                                            </div>
+                                        )}
+                                        {node.followers !== undefined && (
+                                            <div>
+                                                <span className="font-bold text-white">{formatNumber(node.followers)}</span>
+                                                <span className="text-slate-500 ml-1">Followers</span>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
                         </div>
+                    );
+                };
 
-                        {/* Target */}
-                        <div className="flex items-center gap-4">
-                             <div className="w-10 h-10 rounded-full bg-indigo-900/50 border border-indigo-500/30 flex items-center justify-center shrink-0 z-10">
-                                <span className="text-xs font-bold text-indigo-300">B</span>
-                             </div>
-                             <div className="flex-1 min-w-0">
-                                <span className="text-[10px] text-slate-500 uppercase block mb-0.5">Target</span>
-                                <div className="font-bold text-white truncate">{typeof selectedLink.target === 'object' ? (selectedLink.target as any).name : selectedLink.target}</div>
-                             </div>
-                        </div>
-                     </div>
-                </div>
-            )}
+                return (
+                    <>
+                        {renderNodeCard(sourceNode, "Source")}
+                        {renderNodeCard(targetNode, "Target")}
+                    </>
+                );
+            })()}
 
         </div>
       )}

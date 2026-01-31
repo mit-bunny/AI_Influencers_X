@@ -16,6 +16,10 @@ export interface GraphNode {
   joinedDate?: string;
   verified?: 'blue' | 'gold' | 'gray';
   bio?: string; // Short bio from X profile
+  followers?: number; // Follower count
+  following?: number; // Following count
+  location?: string; // Location from X profile
+  website?: string; // Website URL from X profile
 }
 
 export interface GraphLink {
