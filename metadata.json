@@ -1,0 +1,5 @@
+{
+  "name": "AI Influencers on X",
+  "description": "A 3D interactive visualization of the AI influencer network on X, using Gemini to expand connections.",
+  "requestFramePermissions": []
+}
