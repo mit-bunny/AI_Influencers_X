@@ -119,28 +119,48 @@ const Graph3D: React.FC<Graph3DProps> = ({ data, onNodeClick, onLinkClick, selec
   useEffect(() => {
     const fg = graphRef.current;
     if (fg) {
-      fg.d3Force('charge')?.strength(-1000); 
-      fg.d3Force('link')?.distance(35);      
-      fg.d3Force('center')?.strength(1.2);   
+      fg.d3Force('charge')?.strength(-1000);
+      fg.d3Force('link')?.distance(35);
+      fg.d3Force('center')?.strength(1.2);
     }
   }, [processedData]);
 
-  // Generate Glow Texture
+  // Center camera on selected node
+  useEffect(() => {
+    const fg = graphRef.current;
+    if (fg && selectedNode) {
+      // Find the node in processed data to get its current position
+      const node = processedData.nodes.find((n: any) => n.id === selectedNode.id) as any;
+      if (node && typeof node.x === 'number' && typeof node.y === 'number' && typeof node.z === 'number') {
+        const distance = 700;
+        const distRatio = 1 + distance / Math.hypot(node.x, node.y, node.z);
+        fg.cameraPosition(
+          { x: node.x * distRatio, y: node.y * distRatio, z: node.z * distRatio },
+          { x: node.x, y: node.y, z: node.z },
+          1000 // transition duration in ms
+        );
+      }
+    }
+  }, [selectedNode, processedData.nodes]);
+
+  // Generate Glow Texture - soft diffuse for cosmic look
   const glowTexture = useMemo(() => {
     if (typeof document === 'undefined') return null;
     try {
       const canvas = document.createElement('canvas');
-      canvas.width = 128; 
-      canvas.height = 128;
+      canvas.width = 256;
+      canvas.height = 256;
       const context = canvas.getContext('2d');
       if (context) {
-        const gradient = context.createRadialGradient(64, 64, 0, 64, 64, 64);
+        const gradient = context.createRadialGradient(128, 128, 0, 128, 128, 128);
         gradient.addColorStop(0, 'rgba(255, 255, 255, 1)');
-        gradient.addColorStop(0.2, 'rgba(255, 255, 255, 0.8)');
-        gradient.addColorStop(0.5, 'rgba(255, 255, 255, 0.2)');
+        gradient.addColorStop(0.05, 'rgba(255, 255, 255, 0.8)');
+        gradient.addColorStop(0.1, 'rgba(255, 255, 255, 0.4)');
+        gradient.addColorStop(0.3, 'rgba(255, 255, 255, 0.1)');
+        gradient.addColorStop(0.6, 'rgba(255, 255, 255, 0.02)');
         gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
         context.fillStyle = gradient;
-        context.fillRect(0, 0, 128, 128);
+        context.fillRect(0, 0, 256, 256);
       }
       return new THREE.CanvasTexture(canvas);
     } catch (e) {
@@ -148,71 +168,109 @@ const Graph3D: React.FC<Graph3DProps> = ({ data, onNodeClick, onLinkClick, selec
     }
   }, []);
 
-  const getNodeStyle = useCallback((val: number) => {
-    if (val > 10) {
-        return { color: '#FFFAF0', glowColor: '#F59E0B', radius: 18, scale: 100 };
-    } else if (val > 5) {
-        return { color: '#E0F2FE', glowColor: '#38BDF8', radius: 12, scale: 60 };
-    } else if (val > 2) {
-        return { color: '#94A3B8', glowColor: '#6366F1', radius: 6, scale: 35 };
-    } else {
-        return { color: '#475569', glowColor: '#334155', radius: 4, scale: 20 };
+  // Color scheme by category - vibrant colors
+  const getCategoryColor = useCallback((group: string) => {
+    switch (group) {
+      case 'company':
+        return { color: '#FFD700', glowColor: '#FF8C00' }; // Gold/Orange
+      case 'founder':
+        return { color: '#00BFFF', glowColor: '#00BFFF' }; // Cyan-Blue
+      case 'researcher':
+        return { color: '#DA70D6', glowColor: '#BA55D3' }; // Purple
+      case 'investor':
+        return { color: '#00FF7F', glowColor: '#32CD32' }; // Green
+      case 'media':
+        return { color: '#FF69B4', glowColor: '#FF69B4' }; // Pink
+      case 'engineer':
+        return { color: '#00FFFF', glowColor: '#00FFFF' }; // Cyan
+      default:
+        return { color: '#E2E8F0', glowColor: '#64748B' }; // Slate
     }
   }, []);
 
+  const getNodeStyle = useCallback((val: number, group: string) => {
+    const categoryColors = getCategoryColor(group);
+    if (val > 10) {
+        return { ...categoryColors, radius: 30, scale: 160 };
+    } else if (val > 5) {
+        return { ...categoryColors, radius: 22, scale: 110 };
+    } else if (val > 2) {
+        return { ...categoryColors, radius: 14, scale: 70 };
+    } else {
+        return { ...categoryColors, radius: 10, scale: 45 };
+    }
+  }, [getCategoryColor]);
+
   const nodeObject = useCallback((node: any) => {
-    if (!node) return new THREE.Mesh(); 
-    
-    const group = new THREE.Group();
+    if (!node) return new THREE.Mesh();
+
+    const threeGroup = new THREE.Group();
     // Default val to 0 if undefined to prevent NaN issues
     const influence = typeof node.val === 'number' ? node.val : 1;
-    const style = getNodeStyle(influence);
+    const nodeGroup = node.group || 'company';
+    const style = getNodeStyle(influence, nodeGroup);
     
     const isSelected = selectedNode?.id === node.id;
     const isNeighbor = neighborIds.has(node.id);
 
-    // Highlight selected node heavily, neighbors moderately, others fade slightly
-    let baseColor = style.color;
+    // Always use category color for the glow
+    let coreColor = '#FFFFFF';
     let glowColor = style.glowColor;
-    let opacity = 0.4;
+    let opacity = 0.85;
     let scale = style.scale;
+    let coreScale = 1;
 
     if (isSelected) {
-        baseColor = '#ffffff';
-        glowColor = '#ff00ff'; // Bright magenta/pink for selection
         opacity = 1;
-        scale = style.scale * 1.2;
+        scale = style.scale * 1.6;
+        coreScale = 1.4;
     } else if (isNeighbor) {
-        baseColor = '#E0E7FF'; // Light indigo
-        glowColor = '#818CF8'; // Indigo glow
-        opacity = 0.8;
+        opacity = 0.95;
+        scale = style.scale * 1.3;
     } else if (selectedNode) {
-        // Dim non-connected nodes if something is selected
-        opacity = 0.1; 
+        // Dim non-connected nodes but keep category color
+        opacity = 0.25;
+        coreColor = '#888888';
     }
 
-    // 1. Solid Core Sphere
-    const geometry = new THREE.SphereGeometry(style.radius, 32, 32);
-    const material = new THREE.MeshBasicMaterial({ color: baseColor });
-    const sphere = new THREE.Mesh(geometry, material);
-    group.add(sphere);
-
-    // 2. Glow Sprite
+    // 1. Large colored glow (outer halo)
     if (glowTexture) {
-        const spriteMaterial = new THREE.SpriteMaterial({ 
-            map: glowTexture, 
-            color: glowColor, 
+        const outerGlowMaterial = new THREE.SpriteMaterial({
+            map: glowTexture,
+            color: new THREE.Color(glowColor),
             transparent: true,
             opacity: opacity,
             blending: THREE.AdditiveBlending,
             depthWrite: false
         });
-        const sprite = new THREE.Sprite(spriteMaterial);
-        sprite.scale.set(scale, scale, 1);
-        group.add(sprite);
+        const outerGlow = new THREE.Sprite(outerGlowMaterial);
+        outerGlow.scale.set(scale * 3.5, scale * 3.5, 1);
+        threeGroup.add(outerGlow);
     }
 
-    return group;
+    // 2. Inner bright core glow (white)
+    if (glowTexture) {
+        const coreGlowMaterial = new THREE.SpriteMaterial({
+            map: glowTexture,
+            color: new THREE.Color('#FFFFFF'),
+            transparent: true,
+            opacity: opacity * 0.9,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false
+        });
+        const coreGlow = new THREE.Sprite(coreGlowMaterial);
+        coreGlow.scale.set(scale * 0.5, scale * 0.5, 1);
+        threeGroup.add(coreGlow);
+    }
+
+    // 3. Tiny bright core point
+    const coreRadius = style.radius * 0.2 * coreScale;
+    const coreGeometry = new THREE.SphereGeometry(coreRadius, 16, 16);
+    const coreMaterial = new THREE.MeshBasicMaterial({ color: coreColor });
+    const coreSphere = new THREE.Mesh(coreGeometry, coreMaterial);
+    threeGroup.add(coreSphere);
+
+    return threeGroup;
   }, [glowTexture, getNodeStyle, selectedNode, neighborIds]);
 
   // Helper to safely get node ID from link end
@@ -224,42 +282,39 @@ const Graph3D: React.FC<Graph3DProps> = ({ data, onNodeClick, onLinkClick, selec
   };
 
   const getLinkColor = useCallback((link: any) => {
-     if (!link) return "rgba(148, 163, 184, 0.1)";
+     if (!link) return "rgba(180, 180, 190, 0.2)";
 
-     if (link === hoveredLink) return "#F59E0B"; 
-     
      const sId = getLinkId(link.source);
      const tId = getLinkId(link.target);
      const selId = selectedNode?.id;
 
+     // Hovered link
+     if (link === hoveredLink) return "rgba(150, 200, 255, 0.8)";
+
+     // Connected to selected node - subtle light blue glow
      if (selId && (sId === selId || tId === selId)) {
-         return "#A855F7"; // Purple for active connections
+         return "rgba(130, 180, 255, 0.6)";
      }
 
-     // If a node is selected, dim unrelated links significantly
+     // If a node is selected, dim unrelated links
      if (selId) {
-         return "rgba(148, 163, 184, 0.05)";
+         return "rgba(150, 150, 160, 0.08)";
      }
 
-     // Use objects if available (d3 resolved), else fallback to 0
-     const sourceVal = (link.source && typeof link.source === 'object' ? link.source.val : 0) || 0;
-     const targetVal = (link.target && typeof link.target === 'object' ? link.target.val : 0) || 0;
-
-     if (sourceVal > 10 && targetVal > 10) return "rgba(245, 158, 11, 0.6)"; 
-     if (sourceVal > 8 || targetVal > 8) return "rgba(56, 189, 248, 0.4)";
-     return "rgba(148, 163, 184, 0.2)";
+     // Default - subtle light grey
+     return "rgba(180, 180, 190, 0.25)";
   }, [hoveredLink, selectedNode]);
 
   const getLinkWidth = useCallback((link: any) => {
-      if (link === hoveredLink) return 3;
-      
+      if (link === hoveredLink) return 1.5;
+
       const sId = getLinkId(link.source);
       const tId = getLinkId(link.target);
       const selId = selectedNode?.id;
 
-      if (selId && (sId === selId || tId === selId)) return 2.5;
-      
-      return 1;
+      if (selId && (sId === selId || tId === selId)) return 1;
+
+      return 0.4; // Thin subtle lines
   }, [hoveredLink, selectedNode]);
 
   return (

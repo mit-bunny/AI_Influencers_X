@@ -1,19 +1,20 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import Graph3D from './components/Graph3D';
 import { INITIAL_DATA } from './constants';
 import { GraphData, GraphNode, GraphLink } from './types';
-import { expandNetwork } from './services/geminiService';
-import { Sparkles, Loader2, X as XIcon, ExternalLink, User, Building2, Link2, ChevronLeft, ChevronRight, Menu, Calendar, BadgeCheck, MapPin } from 'lucide-react';
+import { X as XIcon, ExternalLink, Building2, Link2, ChevronLeft, ChevronRight, Menu, Calendar, BadgeCheck, MapPin } from 'lucide-react';
 
 export default function App() {
-  const [data, setData] = useState<GraphData>(INITIAL_DATA);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [data] = useState<GraphData>(INITIAL_DATA);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   
   // Selection State
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
   const [selectedLink, setSelectedLink] = useState<GraphLink | null>(null);
+
+  // Refs for scrolling
+  const listContainerRef = useRef<HTMLDivElement>(null);
+  const itemRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
 
   // 1. Calculate Statistics & Sort Nodes by Followers (or connections as fallback)
   const sortedNodes = useMemo(() => {
@@ -35,6 +36,14 @@ export default function App() {
 
   }, [data]);
 
+  // Scroll to selected node in the sidebar
+  useEffect(() => {
+    if (selectedNode && itemRefs.current.has(selectedNode.id)) {
+      const element = itemRefs.current.get(selectedNode.id);
+      element?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  }, [selectedNode]);
+
   const nodeCount = data?.nodes?.length || 0;
   const linkCount = data?.links?.length || 0;
 
@@ -43,53 +52,6 @@ export default function App() {
     if (!nodeRef) return undefined;
     if (typeof nodeRef === 'object' && 'id' in nodeRef) return nodeRef as GraphNode;
     return data.nodes.find(n => n.id === nodeRef);
-  };
-
-  const handleExpandNetwork = async () => {
-    if (loading) return;
-    setLoading(true);
-    setError(null);
-
-    try {
-      const response = await expandNetwork(data);
-      const newNodes = response.newNodes || [];
-      const newLinks = response.newLinks || [];
-
-      if (newNodes.length === 0) {
-        setError("AI couldn't find new connections. Try again.");
-        setLoading(false);
-        return;
-      }
-
-      setData(prev => {
-        const existingIds = new Set((prev.nodes || []).map(n => n.id));
-        const uniqueNewNodes = newNodes
-          .map(n => ({ 
-             ...n, 
-             id: n.name.replace(/\s+/g, ''),
-             // Default fallbacks for new nodes if LLM misses something
-             verified: (n.group === 'company' ? 'gold' : 'blue') as 'blue' | 'gold' | 'gray',
-             bioTags: n.bioTags || ['AI', 'Tech']
-          }))
-          .filter(n => !existingIds.has(n.id));
-
-        const newLinksFormatted = newLinks.map(l => ({
-           source: (l.source || "").replace(/\s+/g, ''),
-           target: (l.target || "").replace(/\s+/g, '')
-        })).filter(l => l.source && l.target); 
-
-        return {
-          nodes: [...(prev.nodes || []), ...uniqueNewNodes],
-          links: [...(prev.links || []), ...newLinksFormatted]
-        };
-      });
-
-    } catch (e) {
-      console.error(e);
-      setError("Failed to expand network.");
-    } finally {
-      setLoading(false);
-    }
   };
 
   const handleNodeClick = (node: GraphNode) => {
@@ -157,6 +119,10 @@ export default function App() {
                 return (
                     <button
                         key={node.id}
+                        ref={(el) => {
+                            if (el) itemRefs.current.set(node.id, el);
+                            else itemRefs.current.delete(node.id);
+                        }}
                         onClick={() => handleNodeClick(node)}
                         className={`w-full text-left p-3 rounded-xl mb-1 flex items-center gap-3 transition-all duration-200 border ${isSelected ? 'bg-indigo-600/20 border-indigo-500/50 shadow-lg shadow-indigo-900/20' : 'hover:bg-white/5 border-transparent'}`}
                     >
@@ -164,21 +130,25 @@ export default function App() {
                            {idx + 1}
                         </div>
                         <div className="min-w-0 flex-1">
-                            <div className={`text-sm font-semibold truncate ${isSelected ? 'text-white' : 'text-slate-200'}`}>
-                                {node.name}
+                            <div className="flex items-baseline gap-1.5 truncate">
+                                <span className={`text-sm font-semibold ${isSelected ? 'text-white' : 'text-slate-200'}`}>
+                                    {node.name}
+                                </span>
+                                {node.handle && (
+                                    <span className="text-xs text-slate-500 font-mono truncate">
+                                        @{node.handle}
+                                    </span>
+                                )}
                             </div>
-                            {node.handle && (
-                                <div className="text-xs text-slate-400 font-mono truncate">
-                                    @{node.handle}
-                                </div>
-                            )}
-                            {node.role && (
-                                <div className="text-xs text-slate-500 truncate mt-0.5">
-                                    {node.role}{node.associated && node.associated !== node.name ? ` @ ${node.associated}` : ''}
-                                </div>
-                            )}
-                            <div className="text-[10px] text-slate-600 mt-1">
-                                {node.followers ? `${(node.followers / 1000000).toFixed(1)}M followers` : `${node.val} connections`}
+                            <div className="flex items-center justify-between gap-2 mt-0.5">
+                                {node.role && (
+                                    <span className="text-xs text-slate-500 truncate">
+                                        {node.role}{node.associated && node.associated !== node.name ? ` @ ${node.associated}` : ''}
+                                    </span>
+                                )}
+                                <span className="text-[10px] text-slate-600 whitespace-nowrap">
+                                    {node.followers ? `${(node.followers / 1000000).toFixed(1)}M` : `${node.val} conn.`}
+                                </span>
                             </div>
                         </div>
                         {isSelected && <ChevronRight className="w-4 h-4 text-indigo-400" />}
@@ -456,28 +426,35 @@ export default function App() {
         </div>
       )}
 
-      {/* Controls Overlay (Bottom Center) */}
-      <div className={`absolute bottom-8 left-1/2 transform -translate-x-1/2 z-20 pointer-events-auto flex flex-col items-center gap-4 transition-all duration-300 ${isSidebarOpen ? 'pl-40' : 'pl-0'}`}>
-        {error && (
-          <div className="bg-red-500/20 border border-red-500/50 text-red-200 px-4 py-2 rounded-lg text-sm mb-2 backdrop-blur-md">
-            {error}
+      {/* Legend */}
+      <div className="absolute bottom-6 right-6 z-20 bg-[#0B0C15]/80 backdrop-blur-md border border-white/10 rounded-xl p-4">
+        <div className="text-xs text-slate-400 uppercase tracking-wider mb-3 font-medium">Legend</div>
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-3 rounded-full bg-[#FF8C00] shadow-[0_0_8px_#FF8C00]" />
+            <span className="text-xs text-slate-300">Company / Lab</span>
           </div>
-        )}
-        
-        <button
-          onClick={handleExpandNetwork}
-          disabled={loading}
-          className="group relative px-8 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-full shadow-[0_0_20px_rgba(79,70,229,0.5)] hover:shadow-[0_0_30px_rgba(79,70,229,0.7)] transition-all duration-300 flex items-center gap-3 overflow-hidden border border-indigo-400/30"
-        >
-          {loading ? (
-             <Loader2 className="w-5 h-5 animate-spin text-white/80" />
-          ) : (
-             <Sparkles className="w-5 h-5 text-amber-200" />
-          )}
-          <span className="font-semibold tracking-wide text-sm">
-            {loading ? "Discovering..." : "Expand Universe"}
-          </span>
-        </button>
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-3 rounded-full bg-[#00BFFF] shadow-[0_0_8px_#00BFFF]" />
+            <span className="text-xs text-slate-300">Founder / Executive</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-3 rounded-full bg-[#BA55D3] shadow-[0_0_8px_#BA55D3]" />
+            <span className="text-xs text-slate-300">Researcher / Academic</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-3 rounded-full bg-[#32CD32] shadow-[0_0_8px_#32CD32]" />
+            <span className="text-xs text-slate-300">Investor / VC</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-3 rounded-full bg-[#FF69B4] shadow-[0_0_8px_#FF69B4]" />
+            <span className="text-xs text-slate-300">Media / Creator</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-3 rounded-full bg-[#00FFFF] shadow-[0_0_8px_#00FFFF]" />
+            <span className="text-xs text-slate-300">Engineer / Builder</span>
+          </div>
+        </div>
       </div>
 
       <style>{`
