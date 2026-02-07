@@ -1,7 +1,7 @@
 export interface GraphNode {
   id: string;
   name: string;
-  group: 'company' | 'founder' | 'researcher' | 'investor' | 'media' | 'engineer';
+  group: 'company' | 'founder' | 'researcher' | 'investor' | 'media';
   role?: string; // Job title or description
   handle?: string; // X (Twitter) username without @
   associated?: string; // Associated company or lab
@@ -36,7 +36,7 @@ export interface GraphData {
 export interface InfluencerResponse {
   newNodes: Array<{ 
     name: string; 
-    group: 'company' | 'founder' | 'researcher' | 'investor' | 'media' | 'engineer';
+    group: 'company' | 'founder' | 'researcher' | 'investor' | 'media';
     role: string;
     handle: string;
     associated: string;

@@ -6,15 +6,18 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "fetch-influencers": "node scripts/fetchInfluencers.js"
   },
   "dependencies": {
     "@google/genai": "^1.38.0",
+    "dotenv": "^17.2.4",
     "lucide-react": "0.263.1",
     "react": "18.2.0",
     "react-dom": "18.2.0",
+    "react-force-graph-3d": "1.29.0",
     "three": "0.160.0",
-    "react-force-graph-3d": "1.29.0"
+    "three-spritetext": "^1.10.0"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

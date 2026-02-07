@@ -1,6 +1,7 @@
 import React, { useRef, useMemo, useCallback, useState, useEffect } from 'react';
 import ForceGraph3D, { ForceGraphMethods } from 'react-force-graph-3d';
 import * as THREE from 'three';
+import { CSS2DRenderer, CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 import { GraphData, GraphNode, GraphLink } from '../types';
 
 interface Graph3DProps {
@@ -13,6 +14,8 @@ interface Graph3DProps {
 const Graph3D: React.FC<Graph3DProps> = ({ data, onNodeClick, onLinkClick, selectedNode }) => {
   const graphRef = useRef<ForceGraphMethods>(null);
   const [hoveredLink, setHoveredLink] = useState<GraphLink | null>(null);
+  const labelsRef = useRef<Map<string, { element: HTMLDivElement; object: THREE.Object3D }>>(new Map());
+  const materialsRef = useRef<Map<string, THREE.MeshLambertMaterial>>(new Map());
 
   // Process data: Clean links, calculate degrees, and filter disconnected nodes
   const processedData = useMemo(() => {
@@ -23,13 +26,11 @@ const Graph3D: React.FC<Graph3DProps> = ({ data, onNodeClick, onLinkClick, selec
 
     // 1. Node Deduplication & Sanitization
     const uniqueNodesMap = new Map<string, GraphNode>();
-    
+
     data.nodes.forEach(n => {
       if (n && n.id) {
         const id = String(n.id).trim();
         if (id) {
-            // Create a clean copy to avoid mutation issues/stale references
-            // Initialize val to 0 to ensure numeric operations don't fail later
             uniqueNodesMap.set(id, { ...n, id, val: 0 });
         }
       }
@@ -45,7 +46,6 @@ const Graph3D: React.FC<Graph3DProps> = ({ data, onNodeClick, onLinkClick, selec
         let sourceId: string | null = null;
         let targetId: string | null = null;
 
-        // Extract IDs safely from either Object or String
         if (typeof link.source === 'object' && link.source !== null && 'id' in link.source) {
              sourceId = String((link.source as any).id).trim();
         } else if (typeof link.source === 'string' || typeof link.source === 'number') {
@@ -58,13 +58,10 @@ const Graph3D: React.FC<Graph3DProps> = ({ data, onNodeClick, onLinkClick, selec
              targetId = String(link.target).trim();
         }
 
-        // Strict Check: Only add link if BOTH ends exist in our node map
         if (sourceId && targetId && nodeIds.has(sourceId) && nodeIds.has(targetId)) {
-            // We push plain objects with string IDs. 
-            // react-force-graph will mutate these to reference node objects.
             validLinks.push({
-                source: sourceId, 
-                target: targetId, 
+                source: sourceId,
+                target: targetId,
                 value: link.value || 1
             });
         }
@@ -73,13 +70,11 @@ const Graph3D: React.FC<Graph3DProps> = ({ data, onNodeClick, onLinkClick, selec
     // 3. Calculate Degrees based on VALID links only
     const degrees = new Map<string, number>();
     validLinks.forEach(link => {
-        // At this stage, source/target are guaranteed to be strings from the push above
         degrees.set(link.source, (degrees.get(link.source) || 0) + 1);
         degrees.set(link.target, (degrees.get(link.target) || 0) + 1);
     });
 
-    // 4. Filter Orphaned Nodes (Keep only nodes with degree > 0)
-    // We also make sure the node object is valid
+    // 4. Filter Orphaned Nodes
     const connectedNodes = Array.from(uniqueNodesMap.values())
         .filter(n => {
             const degree = degrees.get(n.id) || 0;
@@ -91,7 +86,7 @@ const Graph3D: React.FC<Graph3DProps> = ({ data, onNodeClick, onLinkClick, selec
        n.val = degrees.get(n.id) || 0;
     });
 
-    // 6. Paranoid Check: Ensure returned links strictly reference returned nodes
+    // 6. Ensure returned links strictly reference returned nodes
     const finalNodeIds = new Set(connectedNodes.map(n => n.id));
     const finalLinks = validLinks.filter(l => finalNodeIds.has(l.source) && finalNodeIds.has(l.target));
 
@@ -104,7 +99,6 @@ const Graph3D: React.FC<Graph3DProps> = ({ data, onNodeClick, onLinkClick, selec
     if (!selectedNode) return ids;
 
     processedData.links.forEach((link: any) => {
-       // ForceGraph eventually replaces IDs with objects, so we handle both
        const sId = typeof link.source === 'object' ? link.source.id : link.source;
        const tId = typeof link.target === 'object' ? link.target.id : link.target;
 
@@ -129,7 +123,6 @@ const Graph3D: React.FC<Graph3DProps> = ({ data, onNodeClick, onLinkClick, selec
   useEffect(() => {
     const fg = graphRef.current;
     if (fg && selectedNode) {
-      // Find the node in processed data to get its current position
       const node = processedData.nodes.find((n: any) => n.id === selectedNode.id) as any;
       if (node && typeof node.x === 'number' && typeof node.y === 'number' && typeof node.z === 'number') {
         const distance = 700;
@@ -137,141 +130,181 @@ const Graph3D: React.FC<Graph3DProps> = ({ data, onNodeClick, onLinkClick, selec
         fg.cameraPosition(
           { x: node.x * distRatio, y: node.y * distRatio, z: node.z * distRatio },
           { x: node.x, y: node.y, z: node.z },
-          1000 // transition duration in ms
+          1000
         );
       }
     }
   }, [selectedNode, processedData.nodes]);
 
-  // Generate Glow Texture - soft diffuse for cosmic look
-  const glowTexture = useMemo(() => {
-    if (typeof document === 'undefined') return null;
-    try {
-      const canvas = document.createElement('canvas');
-      canvas.width = 256;
-      canvas.height = 256;
-      const context = canvas.getContext('2d');
-      if (context) {
-        const gradient = context.createRadialGradient(128, 128, 0, 128, 128, 128);
-        gradient.addColorStop(0, 'rgba(255, 255, 255, 1)');
-        gradient.addColorStop(0.05, 'rgba(255, 255, 255, 0.8)');
-        gradient.addColorStop(0.1, 'rgba(255, 255, 255, 0.4)');
-        gradient.addColorStop(0.3, 'rgba(255, 255, 255, 0.1)');
-        gradient.addColorStop(0.6, 'rgba(255, 255, 255, 0.02)');
-        gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
-        context.fillStyle = gradient;
-        context.fillRect(0, 0, 256, 256);
-      }
-      return new THREE.CanvasTexture(canvas);
-    } catch (e) {
-      return null;
-    }
-  }, []);
-
-  // Color scheme by category - vibrant colors
+  // Color scheme by category - pastel/light tinted colors
   const getCategoryColor = useCallback((group: string) => {
     switch (group) {
       case 'company':
-        return { color: '#FFD700', glowColor: '#FF8C00' }; // Gold/Orange
+        return '#FFD4A3'; // Light peach/orange
       case 'founder':
-        return { color: '#00BFFF', glowColor: '#00BFFF' }; // Cyan-Blue
+        return '#A3D4FF'; // Light sky blue
       case 'researcher':
-        return { color: '#DA70D6', glowColor: '#BA55D3' }; // Purple
+        return '#E0B3FF'; // Light lavender
       case 'investor':
-        return { color: '#00FF7F', glowColor: '#32CD32' }; // Green
+        return '#B3FFB3'; // Light mint green
       case 'media':
-        return { color: '#FF69B4', glowColor: '#FF69B4' }; // Pink
-      case 'engineer':
-        return { color: '#00FFFF', glowColor: '#00FFFF' }; // Cyan
+        return '#FFB3D9'; // Light pink
       default:
-        return { color: '#E2E8F0', glowColor: '#64748B' }; // Slate
+        return '#D0D4DC'; // Light slate
     }
   }, []);
 
-  const getNodeStyle = useCallback((val: number, group: string) => {
-    const categoryColors = getCategoryColor(group);
-    if (val > 10) {
-        return { ...categoryColors, radius: 30, scale: 160 };
-    } else if (val > 5) {
-        return { ...categoryColors, radius: 22, scale: 110 };
-    } else if (val > 2) {
-        return { ...categoryColors, radius: 14, scale: 70 };
-    } else {
-        return { ...categoryColors, radius: 10, scale: 45 };
-    }
-  }, [getCategoryColor]);
+  // Node color based on category and selection state
+  const getNodeColor = useCallback((node: any) => {
+    const baseColor = getCategoryColor(node.group || 'company');
 
-  const nodeObject = useCallback((node: any) => {
-    if (!node) return new THREE.Mesh();
-
-    const threeGroup = new THREE.Group();
-    // Default val to 0 if undefined to prevent NaN issues
-    const influence = typeof node.val === 'number' ? node.val : 1;
-    const nodeGroup = node.group || 'company';
-    const style = getNodeStyle(influence, nodeGroup);
-    
-    const isSelected = selectedNode?.id === node.id;
-    const isNeighbor = neighborIds.has(node.id);
-
-    // Always use category color for the glow
-    let coreColor = '#FFFFFF';
-    let glowColor = style.glowColor;
-    let opacity = 0.85;
-    let scale = style.scale;
-    let coreScale = 1;
-
-    if (isSelected) {
-        opacity = 1;
-        scale = style.scale * 1.6;
-        coreScale = 1.4;
-    } else if (isNeighbor) {
-        opacity = 0.95;
-        scale = style.scale * 1.3;
-    } else if (selectedNode) {
-        // Dim non-connected nodes but keep category color
-        opacity = 0.25;
-        coreColor = '#888888';
+    if (selectedNode) {
+      if (node.id === selectedNode.id) {
+        return baseColor; // Selected node keeps full color
+      } else if (neighborIds.has(node.id)) {
+        return baseColor; // Neighbors keep full color
+      } else {
+        return '#333333'; // Dim other nodes
+      }
     }
 
-    // 1. Large colored glow (outer halo)
-    if (glowTexture) {
-        const outerGlowMaterial = new THREE.SpriteMaterial({
-            map: glowTexture,
-            color: new THREE.Color(glowColor),
-            transparent: true,
-            opacity: opacity,
-            blending: THREE.AdditiveBlending,
-            depthWrite: false
-        });
-        const outerGlow = new THREE.Sprite(outerGlowMaterial);
-        outerGlow.scale.set(scale * 3.5, scale * 3.5, 1);
-        threeGroup.add(outerGlow);
-    }
+    return baseColor;
+  }, [selectedNode, neighborIds, getCategoryColor]);
 
-    // 2. Inner bright core glow (white)
-    if (glowTexture) {
-        const coreGlowMaterial = new THREE.SpriteMaterial({
-            map: glowTexture,
-            color: new THREE.Color('#FFFFFF'),
-            transparent: true,
-            opacity: opacity * 0.9,
-            blending: THREE.AdditiveBlending,
-            depthWrite: false
-        });
-        const coreGlow = new THREE.Sprite(coreGlowMaterial);
-        coreGlow.scale.set(scale * 0.5, scale * 0.5, 1);
-        threeGroup.add(coreGlow);
-    }
+  // Node size based on connections
+  const getNodeSize = useCallback((node: any) => {
+    const val = node.val || 1;
+    if (val > 10) return 12;
+    if (val > 5) return 9;
+    if (val > 2) return 6;
+    return 4;
+  }, []);
 
-    // 3. Tiny bright core point
-    const coreRadius = style.radius * 0.2 * coreScale;
-    const coreGeometry = new THREE.SphereGeometry(coreRadius, 16, 16);
-    const coreMaterial = new THREE.MeshBasicMaterial({ color: coreColor });
-    const coreSphere = new THREE.Mesh(coreGeometry, coreMaterial);
-    threeGroup.add(coreSphere);
+  // Create node with sphere and HTML text label
+  const nodeThreeObject = useCallback((node: any) => {
+    const group = new THREE.Group();
 
-    return threeGroup;
-  }, [glowTexture, getNodeStyle, selectedNode, neighborIds]);
+    // Create sphere
+    const nodeSize = getNodeSize(node);
+    const baseColor = getCategoryColor(node.group || 'company');
+    const geometry = new THREE.SphereGeometry(nodeSize, 16, 16);
+    const material = new THREE.MeshLambertMaterial({
+      color: baseColor,
+      transparent: true,
+      opacity: 0.9
+    });
+    const sphere = new THREE.Mesh(geometry, material);
+    group.add(sphere);
+
+    // Store material reference for dynamic color updates
+    materialsRef.current.set(node.id, material);
+
+    // Create HTML text label
+    const labelDiv = document.createElement('div');
+    labelDiv.className = 'node-label';
+    labelDiv.textContent = node.name || node.id;
+    labelDiv.style.color = 'white';
+    labelDiv.style.fontSize = '9px';
+    labelDiv.style.fontFamily = 'Arial, sans-serif';
+    labelDiv.style.fontWeight = 'bold';
+    labelDiv.style.textShadow = '0 0 2px black, 0 0 2px black';
+    labelDiv.style.pointerEvents = 'none';
+    labelDiv.style.whiteSpace = 'nowrap';
+    labelDiv.style.opacity = '0';
+    labelDiv.style.transition = 'opacity 0.2s';
+
+    const label = new CSS2DObject(labelDiv);
+    label.position.set(0, -nodeSize - 10, 0);
+    group.add(label);
+
+    // Store reference for distance-based visibility
+    labelsRef.current.set(node.id, { element: labelDiv, object: group });
+
+    return group;
+  }, [getNodeSize, getCategoryColor]);
+
+  // Set up CSS2DRenderer for HTML labels
+  const extraRenderers = useMemo(() => [new CSS2DRenderer()], []);
+
+  // Update label visibility based on camera distance and selection
+  useEffect(() => {
+    const VISIBILITY_DISTANCE = 800; // Labels visible within this distance
+
+    const updateLabelVisibility = () => {
+      const fg = graphRef.current;
+      if (!fg) return;
+
+      const camera = fg.camera();
+      if (!camera) return;
+
+      const cameraPos = camera.position;
+
+      labelsRef.current.forEach(({ element, object }, nodeId) => {
+        // Always show selected node and its neighbors
+        const isSelected = selectedNode?.id === nodeId;
+        const isNeighbor = neighborIds.has(nodeId);
+
+        if (isSelected || isNeighbor) {
+          element.style.opacity = '1';
+          return;
+        }
+
+        // Get world position of the node
+        const worldPos = new THREE.Vector3();
+        object.getWorldPosition(worldPos);
+
+        // Calculate distance from camera
+        const distance = cameraPos.distanceTo(worldPos);
+
+        // Show label if close enough
+        if (distance < VISIBILITY_DISTANCE) {
+          const opacity = Math.max(0, 1 - (distance / VISIBILITY_DISTANCE) * 0.5);
+          element.style.opacity = String(opacity);
+        } else {
+          element.style.opacity = '0';
+        }
+      });
+    };
+
+    // Update visibility on animation frame
+    let animationId: number;
+    const animate = () => {
+      updateLabelVisibility();
+      animationId = requestAnimationFrame(animate);
+    };
+    animate();
+
+    return () => {
+      cancelAnimationFrame(animationId);
+    };
+  }, [selectedNode, neighborIds]);
+
+  // Update node colors when selection changes
+  useEffect(() => {
+    materialsRef.current.forEach((material, nodeId) => {
+      // Find the node to get its group/category
+      const node = processedData.nodes.find(n => n.id === nodeId);
+      if (!node) return;
+
+      const baseColor = getCategoryColor(node.group || 'company');
+
+      if (selectedNode) {
+        if (nodeId === selectedNode.id || neighborIds.has(nodeId)) {
+          // Selected or neighbor: full color
+          material.color.set(baseColor);
+          material.opacity = 0.9;
+        } else {
+          // Not connected: dim gray
+          material.color.set('#333333');
+          material.opacity = 0.5;
+        }
+      } else {
+        // No selection: show category color
+        material.color.set(baseColor);
+        material.opacity = 0.9;
+      }
+    });
+  }, [selectedNode, neighborIds, processedData.nodes, getCategoryColor]);
 
   // Helper to safely get node ID from link end
   const getLinkId = (nodeOrId: any): string | null => {
@@ -288,20 +321,16 @@ const Graph3D: React.FC<Graph3DProps> = ({ data, onNodeClick, onLinkClick, selec
      const tId = getLinkId(link.target);
      const selId = selectedNode?.id;
 
-     // Hovered link
      if (link === hoveredLink) return "rgba(150, 200, 255, 0.8)";
 
-     // Connected to selected node - subtle light blue glow
      if (selId && (sId === selId || tId === selId)) {
          return "rgba(130, 180, 255, 0.6)";
      }
 
-     // If a node is selected, dim unrelated links
      if (selId) {
          return "rgba(150, 150, 160, 0.08)";
      }
 
-     // Default - subtle light grey
      return "rgba(180, 180, 190, 0.25)";
   }, [hoveredLink, selectedNode]);
 
@@ -314,45 +343,112 @@ const Graph3D: React.FC<Graph3DProps> = ({ data, onNodeClick, onLinkClick, selec
 
       if (selId && (sId === selId || tId === selId)) return 1;
 
-      return 0.4; // Thin subtle lines
+      return 0.4;
   }, [hoveredLink, selectedNode]);
+
+  // Zoom controls
+  const handleZoomIn = useCallback(() => {
+    const fg = graphRef.current;
+    if (fg) {
+      const camera = fg.camera();
+      const controls = fg.controls();
+      if (camera && controls) {
+        const distance = camera.position.length();
+        const newDistance = distance * 0.7; // Zoom in by 30%
+        const direction = camera.position.clone().normalize();
+        camera.position.copy(direction.multiplyScalar(newDistance));
+        controls.update();
+      }
+    }
+  }, []);
+
+  const handleZoomOut = useCallback(() => {
+    const fg = graphRef.current;
+    if (fg) {
+      const camera = fg.camera();
+      const controls = fg.controls();
+      if (camera && controls) {
+        const distance = camera.position.length();
+        const newDistance = distance * 1.4; // Zoom out by 40%
+        const direction = camera.position.clone().normalize();
+        camera.position.copy(direction.multiplyScalar(newDistance));
+        controls.update();
+      }
+    }
+  }, []);
+
+  const handleResetView = useCallback(() => {
+    const fg = graphRef.current;
+    if (fg) {
+      fg.zoomToFit(500, 5); // 500ms animation, 5px padding
+    }
+  }, []);
 
   return (
     <div className="absolute inset-0 z-0 bg-[#0B0C15]">
+      {/* Zoom Controls - bottom center, horizontal */}
+      <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-50 flex flex-row bg-black/40 backdrop-blur-md rounded-lg border border-white/10 overflow-hidden">
+        <button
+          onClick={handleZoomOut}
+          className="px-4 py-2 text-white hover:bg-white/10 transition-colors border-r border-white/10"
+          title="Zoom Out"
+        >
+          <span className="text-lg font-light">−</span>
+        </button>
+        <button
+          onClick={handleResetView}
+          className="px-4 py-2 text-white hover:bg-white/10 transition-colors border-r border-white/10"
+          title="Reset View"
+        >
+          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+            <path d="M3 3v5h5" />
+          </svg>
+        </button>
+        <button
+          onClick={handleZoomIn}
+          className="px-4 py-2 text-white hover:bg-white/10 transition-colors"
+          title="Zoom In"
+        >
+          <span className="text-lg font-light">+</span>
+        </button>
+      </div>
+
       <ForceGraph3D
         ref={graphRef}
         graphData={processedData}
         nodeId="id"
-        nodeLabel="name"
+        nodeLabel=""
         backgroundColor="#0B0C15"
-        nodeThreeObject={nodeObject}
-        
+        extraRenderers={extraRenderers}
+
+        // Custom node with sphere and label
+        nodeThreeObject={nodeThreeObject}
+
         // Link Styling
         linkColor={getLinkColor}
         linkWidth={getLinkWidth}
         linkOpacity={1}
         linkDirectionalParticles={0}
-        
+
         // Interaction
         enableNodeDrag={true}
         onNodeClick={(node) => node && onNodeClick(node)}
         onLinkClick={(link) => link && onLinkClick(link as GraphLink)}
         onLinkHover={(link) => setHoveredLink(link as GraphLink | null)}
-        
+
         // Physics
         d3VelocityDecay={0.4}
         d3AlphaDecay={0.02}
-        
-        // Safety: check node existence before accessing coordinates
+
         onNodeDragEnd={(node: any) => {
           if (node && typeof node === 'object') {
-             // Only set fixed position if coordinates exist and are numbers
              if ('x' in node && typeof node.x === 'number') node.fx = node.x;
              if ('y' in node && typeof node.y === 'number') node.fy = node.y;
              if ('z' in node && typeof node.z === 'number') node.fz = node.z;
           }
         }}
-        
+
         controlType="orbit"
       />
     </div>

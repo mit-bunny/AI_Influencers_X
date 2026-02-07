@@ -4,6 +4,18 @@ import { INITIAL_DATA } from './constants';
 import { GraphData, GraphNode, GraphLink } from './types';
 import { X as XIcon, ExternalLink, Building2, Link2, ChevronLeft, ChevronRight, Menu, Calendar, BadgeCheck, MapPin } from 'lucide-react';
 
+// Creator profile
+const CREATOR_PROFILE: GraphNode = {
+  id: 'jenny_the_bunny',
+  name: 'Jenny',
+  handle: 'Jenny_the_Bunny',
+  group: 'founder',
+  role: 'Creator of this page',
+  bio: 'Building cool things with AI. Creator of this AI influencer page. Let\'s be friends on X ~',
+  joinedDate: 'Mar 2015 but never used until Feb 2026',
+  verified: 'blue',
+};
+
 export default function App() {
   const [data] = useState<GraphData>(INITIAL_DATA);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
@@ -11,6 +23,7 @@ export default function App() {
   // Selection State
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
   const [selectedLink, setSelectedLink] = useState<GraphLink | null>(null);
+  const [showCreatorCard, setShowCreatorCard] = useState(false);
 
   // Refs for scrolling
   const listContainerRef = useRef<HTMLDivElement>(null);
@@ -56,17 +69,20 @@ export default function App() {
 
   const handleNodeClick = (node: GraphNode) => {
     setSelectedLink(null);
+    setShowCreatorCard(false);
     setSelectedNode(node);
   };
 
   const handleLinkClick = (link: GraphLink) => {
     setSelectedNode(null);
+    setShowCreatorCard(false);
     setSelectedLink(link);
   };
 
   const closeSelection = () => {
     setSelectedNode(null);
     setSelectedLink(null);
+    setShowCreatorCard(false);
   };
 
   const getProfileImage = (node: GraphNode) => {
@@ -147,7 +163,11 @@ export default function App() {
                                     </span>
                                 )}
                                 <span className="text-[10px] text-slate-600 whitespace-nowrap">
-                                    {node.followers ? `${(node.followers / 1000000).toFixed(1)}M` : `${node.val} conn.`}
+                                    {node.followers
+                                      ? node.followers >= 1000000
+                                        ? `${(node.followers / 1000000).toFixed(1)}M`
+                                        : `${Math.round(node.followers / 1000)}K`
+                                      : `${node.val} conn.`}
                                 </span>
                             </div>
                         </div>
@@ -157,10 +177,36 @@ export default function App() {
             })}
         </div>
 
-        {/* Sidebar Footer Stats */}
-        <div className="p-4 border-t border-white/10 bg-[#05060A]/50 text-xs text-slate-500 font-mono flex justify-between">
-            <span>{nodeCount} Nodes</span>
-            <span>{linkCount} Edges</span>
+        {/* Creator Profile */}
+        <div className="border-t border-white/10 bg-[#05060A]/50">
+          <button
+            onClick={() => {
+              setSelectedNode(null);
+              setSelectedLink(null);
+              setShowCreatorCard(true);
+            }}
+            className={`w-full text-left p-3 flex items-center gap-3 transition-all duration-200 ${showCreatorCard ? 'bg-indigo-600/20' : 'hover:bg-white/5'}`}
+          >
+            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${showCreatorCard ? 'bg-indigo-500 text-white' : 'bg-slate-800 text-slate-400'}`}>
+              x
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-baseline gap-1.5 truncate">
+                <span className={`text-sm font-semibold ${showCreatorCard ? 'text-white' : 'text-slate-200'}`}>
+                  Jenny
+                </span>
+                <span className="text-xs text-slate-500 font-mono truncate">
+                  @Jenny_the_Bunny
+                </span>
+              </div>
+              <div className="flex items-center gap-2 mt-0.5">
+                <span className="text-xs text-slate-500 truncate">
+                  Creator of this page
+                </span>
+              </div>
+            </div>
+            {showCreatorCard && <ChevronRight className="w-4 h-4 text-indigo-400" />}
+          </button>
         </div>
       </div>
 
@@ -174,9 +220,79 @@ export default function App() {
 
 
       {/* FLOATING DETAILS CARD (Replacing Right Sidebar) */}
-      {(selectedNode || selectedLink) && (
+      {(selectedNode || selectedLink || showCreatorCard) && (
         <div className="fixed top-6 right-6 w-[400px] max-w-[calc(100vw-48px)] z-50 animate-in slide-in-from-right-10 fade-in duration-300 pointer-events-none flex flex-col gap-4">
-            
+
+            {/* Creator Card */}
+            {showCreatorCard && (
+                <div className="bg-[#090A10]/95 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl pointer-events-auto relative overflow-hidden group">
+
+                    {/* Header Banner */}
+                    <div className="h-24 bg-gradient-to-br from-pink-900/50 via-slate-800/50 to-indigo-900/30 relative">
+                        <div className="absolute inset-0 bg-gradient-to-t from-[#090A10]/80 to-transparent" />
+                    </div>
+
+                    {/* Close Button */}
+                    <button
+                        onClick={closeSelection}
+                        className="absolute top-3 right-3 p-1.5 bg-black/40 hover:bg-black/60 rounded-full text-white/80 hover:text-white transition-colors z-20 backdrop-blur-sm"
+                    >
+                        <XIcon className="w-4 h-4" />
+                    </button>
+
+                    {/* Profile Section */}
+                    <div className="px-4 pb-4 relative">
+                        {/* Avatar - Overlapping Header */}
+                        <div className="flex justify-between items-start">
+                            <div className="relative -mt-12 mb-3">
+                                <img
+                                    src={getProfileImage(CREATOR_PROFILE)}
+                                    alt={CREATOR_PROFILE.name}
+                                    onError={(e) => {
+                                        e.currentTarget.onerror = null;
+                                        e.currentTarget.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(CREATOR_PROFILE.name)}&background=1e293b&color=cbd5e1&size=128`;
+                                    }}
+                                    className="w-20 h-20 rounded-full border-4 border-[#090A10] object-cover bg-slate-800 shadow-lg"
+                                />
+                            </div>
+
+                            {/* Follow Button */}
+                            <a
+                                href={`https://x.com/${CREATOR_PROFILE.handle}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="mt-3 px-5 py-2 bg-white hover:bg-white/90 text-black font-bold text-sm rounded-full transition-all"
+                            >
+                                Follow
+                            </a>
+                        </div>
+
+                        {/* Name & Handle */}
+                        <div className="mb-3">
+                            <h2 className="text-xl font-bold text-white flex items-center gap-1.5">
+                                {CREATOR_PROFILE.name}
+                                <BadgeCheck className="w-5 h-5 text-blue-400 fill-blue-400/20" />
+                            </h2>
+                            <div className="text-slate-500 text-sm">@{CREATOR_PROFILE.handle}</div>
+                        </div>
+
+                        {/* Bio */}
+                        <p className="text-sm text-slate-200 leading-relaxed mb-3">
+                            {CREATOR_PROFILE.bio}
+                        </p>
+
+                        {/* Meta Info Row */}
+                        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-500 mb-4">
+                            <div className="flex items-center gap-1">
+                                <Calendar className="w-4 h-4" />
+                                <span>Joined {CREATOR_PROFILE.joinedDate}</span>
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+            )}
+
             {/* Content Cards */}
             {selectedNode && (
                 <>
@@ -431,28 +547,24 @@ export default function App() {
         <div className="text-xs text-slate-400 uppercase tracking-wider mb-3 font-medium">Legend</div>
         <div className="flex flex-col gap-2">
           <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full bg-[#FF8C00] shadow-[0_0_8px_#FF8C00]" />
-            <span className="text-xs text-slate-300">Company / Lab</span>
+            <div className="w-3 h-3 rounded-full bg-[#FFD4A3] shadow-[0_0_8px_#FFD4A3]" />
+            <span className="text-xs text-slate-300">Company / Organization</span>
           </div>
           <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full bg-[#00BFFF] shadow-[0_0_8px_#00BFFF]" />
-            <span className="text-xs text-slate-300">Founder / Executive</span>
+            <div className="w-3 h-3 rounded-full bg-[#A3D4FF] shadow-[0_0_8px_#A3D4FF]" />
+            <span className="text-xs text-slate-300">Founder / Builder</span>
           </div>
           <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full bg-[#BA55D3] shadow-[0_0_8px_#BA55D3]" />
-            <span className="text-xs text-slate-300">Researcher / Academic</span>
+            <div className="w-3 h-3 rounded-full bg-[#E0B3FF] shadow-[0_0_8px_#E0B3FF]" />
+            <span className="text-xs text-slate-300">Researcher / Academia</span>
           </div>
           <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full bg-[#32CD32] shadow-[0_0_8px_#32CD32]" />
-            <span className="text-xs text-slate-300">Investor / VC</span>
+            <div className="w-3 h-3 rounded-full bg-[#B3FFB3] shadow-[0_0_8px_#B3FFB3]" />
+            <span className="text-xs text-slate-300">Investor</span>
           </div>
           <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full bg-[#FF69B4] shadow-[0_0_8px_#FF69B4]" />
-            <span className="text-xs text-slate-300">Media / Creator</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full bg-[#00FFFF] shadow-[0_0_8px_#00FFFF]" />
-            <span className="text-xs text-slate-300">Engineer / Builder</span>
+            <div className="w-3 h-3 rounded-full bg-[#FFB3D9] shadow-[0_0_8px_#FFB3D9]" />
+            <span className="text-xs text-slate-300">Media</span>
           </div>
         </div>
       </div>
