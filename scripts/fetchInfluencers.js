@@ -37,14 +37,13 @@ const SEED_ACCOUNTS = [
   'jackclark',      // Jack Clark (Anthropic)
   'danielabraga',   // Daniela Braga
   'RichardSocher',
-  'OriolVinyalsML',// Oriol Vinyals
+  'OriolVinyalsML', // Oriol Vinyals
   'huggingface',
   'MistralAI',
   'perplexity_ai',
 ];
 
 // AI-relevance keywords - must have at least one in bio to be considered AI community
-// These are more specific to avoid false positives from generic terms
 const AI_KEYWORDS = [
   // Core AI/ML terms
   'artificial intelligence', 'machine learning', ' ai ', ' ml ', 'deep learning',
@@ -71,31 +70,22 @@ const AI_KEYWORDS = [
   'inference', 'embeddings', 'vector', 'rag',
 ];
 
-// Explicit blocklist for known non-AI community members who might slip through
+// Explicit blocklist for known non-AI community members
 const BLOCKLIST = [
-  // Celebrities
-  'johncena', 'john cena',
-  'lilwayne', 'lil wayne',
-  'ivankatrump', 'ivanka trump',
-  'pope', 'pontifex',
-  'katyperry', 'katy perry',
-  'justinbieber', 'justin bieber',
-  'taylorswift', 'taylor swift',
-  'kimkardashian', 'kim kardashian',
-  'kyliejenner', 'kylie jenner',
-  'selenagomez', 'selena gomez',
-  'therock', 'dwayne johnson',
-  'kevinhart', 'kevin hart',
-  'mchammer', 'mc hammer',
-  // General science/media accounts (not AI-specific)
-  'nature',
-  'science',
-  'newscientist',
-  'sciam', 'scientific american',
-  'wired',
-  'techcrunch',
-  'theverge',
-  'engadget',
+  // General science publications (not AI-specific)
+  'nature', 'science', 'sciam', 'newscientist', 'physicstoday',
+  'cellpress', 'plosbiology', 'pnas',
+  'royalsociety', 'physicsworld', 'scientificamerican',
+  // General tech media (not AI-focused)
+  'wired', 'techcrunch', 'theverge', 'engadget',
+  'mashable', 'cnet', 'zdnet', 'arstechnica',
+  // General news outlets
+  'nytimes', 'wsj', 'washingtonpost', 'bbcnews', 'cnn', 'reuters',
+  'bloomberg', 'forbes', 'fortune', 'economist',
+  // Celebrities & general tech figures (not AI-focused)
+  'johncena', 'lilwayne', 'ivankatrump', 'pope', 'pontifex',
+  'katyperry', 'justinbieber', 'taylorswift', 'kimkardashian',
+  'kyliejenner', 'selenagomez', 'therock', 'kevinhart', 'mchammer',
 ];
 
 // Check if a user is likely part of the AI community
@@ -123,7 +113,7 @@ function isAIRelevant(description, name, username) {
 // Rate limiting helper
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-// API call helper
+// API call helper for Twitter API45
 async function apiCall(endpoint, params = {}) {
   const url = new URL(`https://${RAPIDAPI_HOST}${endpoint}`);
   Object.entries(params).forEach(([key, value]) => {
@@ -145,50 +135,47 @@ async function apiCall(endpoint, params = {}) {
   return response.json();
 }
 
-// Get user profile by username
+// Get user profile by username (Twitter API45 format)
 async function getUserByUsername(username) {
   try {
     console.log(`  Fetching profile: @${username}`);
-    const data = await apiCall('/user', { username });
+    const data = await apiCall('/screenname.php', { screenname: username });
     await delay(1000); // 1 second delay to avoid rate limits
-    return data?.result?.data?.user?.result || null;
+    return data;
   } catch (error) {
     console.error(`  Error fetching @${username}:`, error.message);
     return null;
   }
 }
 
-// Get following list for a user by their ID
-async function getFollowings(userId, count = 100) {
+// Get following list for a user by screenname (Twitter API45 format)
+async function getFollowings(screenname) {
   try {
-    const data = await apiCall('/followings', { user: userId, count: count.toString() });
+    const data = await apiCall('/following.php', { screenname });
     await delay(1000); // 1 second delay to avoid rate limits
-    return data;
+    return data?.following || [];
   } catch (error) {
-    console.error(`  Error fetching followings for ID ${userId}:`, error.message);
-    return null;
+    console.error(`  Error fetching followings for @${screenname}:`, error.message);
+    return [];
   }
 }
 
-// Extract user data from API response
+// Extract user data from Twitter API45 profile response
 function extractUserData(user) {
-  if (!user) return null;
-
-  const legacy = user.legacy || {};
-  const core = user.core || {};
+  if (!user || user.status === 'error') return null;
 
   return {
-    id: user.rest_id,
-    username: core.screen_name || legacy.screen_name,
-    name: core.name || legacy.name,
-    description: legacy.description || '',
-    followers_count: legacy.followers_count || 0,
-    following_count: legacy.friends_count || 0,
-    created_at: core.created_at || legacy.created_at,
-    location: legacy.location || '',
-    verified: user.is_blue_verified || legacy.verified,
-    website: legacy.entities?.url?.urls?.[0]?.expanded_url || '',
-    profile_image: user.avatar?.image_url || legacy.profile_image_url_https,
+    id: user.rest_id || user.user_id,
+    username: user.profile || user.screen_name,
+    name: user.name || user.profile || user.screen_name,
+    description: user.desc || user.description || '',
+    followers_count: user.sub_count || user.followers_count || 0,
+    following_count: user.friends || user.friends_count || 0,
+    created_at: user.created_at,
+    location: user.location || '',
+    verified: user.blue_verified || false,
+    website: user.website || '',
+    profile_image: user.avatar || user.profile_image || '',
   };
 }
 
@@ -197,72 +184,47 @@ function categorizeUser(description, name) {
   const bio = (description || '').toLowerCase();
   const lowerName = (name || '').toLowerCase();
 
-  // Check for company/organization indicators
-  if (bio.includes('official') ||
-      bio.includes('company') ||
-      bio.includes('lab') ||
-      bio.includes('inc.') ||
-      bio.includes('research lab') ||
-      bio.includes('we build') ||
-      bio.includes('our mission') ||
+  if (bio.includes('official') || bio.includes('company') || bio.includes('lab') ||
+      bio.includes('inc.') || bio.includes('we build') || bio.includes('our mission') ||
       (lowerName.includes('ai') && !lowerName.includes(' '))) {
     return 'company';
   }
 
-  // Check for investor
-  if (bio.includes('investor') ||
-      bio.includes('venture') ||
-      bio.includes(' vc') ||
-      bio.includes('partner at') ||
-      bio.includes('fund') ||
-      bio.includes('capital')) {
+  if (bio.includes('investor') || bio.includes('venture') || bio.includes(' vc') ||
+      bio.includes('partner at') || bio.includes('fund') || bio.includes('capital')) {
     return 'investor';
   }
 
-  // Check for media
-  if (bio.includes('journalist') ||
-      bio.includes('reporter') ||
-      bio.includes('editor') ||
-      bio.includes('writer at') ||
-      bio.includes('newsletter') ||
-      bio.includes('podcast') ||
-      bio.includes('correspondent')) {
+  if (bio.includes('journalist') || bio.includes('reporter') || bio.includes('editor') ||
+      bio.includes('writer at') || bio.includes('newsletter') || bio.includes('podcast')) {
     return 'media';
   }
 
-  // Check for researcher/academia
-  if (bio.includes('professor') ||
-      bio.includes('phd') ||
-      bio.includes('researcher') ||
-      bio.includes('university') ||
-      bio.includes('research scientist') ||
-      bio.includes('academia') ||
-      bio.includes('postdoc')) {
+  if (bio.includes('professor') || bio.includes('phd') || bio.includes('researcher') ||
+      bio.includes('university') || bio.includes('research scientist') || bio.includes('postdoc')) {
     return 'researcher';
   }
 
-  // Check for founder/builder
-  if (bio.includes('founder') ||
-      bio.includes('ceo') ||
-      bio.includes('co-founder') ||
-      bio.includes('building') ||
-      bio.includes('cofounder') ||
-      bio.includes('built')) {
+  if (bio.includes('founder') || bio.includes('ceo') || bio.includes('co-founder') ||
+      bio.includes('building') || bio.includes('cofounder')) {
     return 'founder';
   }
 
-  // Default to founder
   return 'founder';
 }
 
 // Load curated roles from JSON file
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
-const CURATED_ROLES = require('./curatedRoles.json');
+let CURATED_ROLES = {};
+try {
+  CURATED_ROLES = require('./curatedRoles.json');
+} catch (e) {
+  console.log('Note: curatedRoles.json not found, using auto-extraction only');
+}
 
-// Extract a detailed role/blurb from bio (e.g., "Co-founder and CEO of Coinbase")
+// Extract role from bio
 function extractRole(bio, name, username) {
-  // Check for curated role first
   const handle = (username || '').toLowerCase();
   if (CURATED_ROLES[handle]) {
     return CURATED_ROLES[handle];
@@ -270,55 +232,22 @@ function extractRole(bio, name, username) {
 
   if (!bio) return '';
 
-  // Try to extract a complete role description using patterns
-  const rolePatterns = [
-    // "Co-founder and CEO of X", "Founder & CEO at X"
-    /((?:co-?founder|founder)(?:\s*(?:and|&|,)\s*(?:ceo|cto|president|chairman))?(?:\s+(?:of|at|@)\s+)?@?[\w\s]+?)(?:[.|,]|$)/i,
-    // "CEO of X", "CTO at X"
-    /((?:ceo|cto|coo|cfo|president|chairman|chief\s+\w+\s+officer)(?:\s+(?:of|at|@)\s+)?@?[\w\s]+?)(?:[.|,]|$)/i,
-    // "VP of Research at X", "Head of AI at X"
-    /((?:vp|vice president|director|head)\s+(?:of\s+)?[\w\s]+?(?:\s+(?:at|@)\s+)?@?[\w\s]+?)(?:[.|,]|$)/i,
-    // "Professor of X at Y", "Research Scientist at X"
-    /((?:professor|research\s+scientist|researcher|scientist|engineer)(?:\s+(?:of|in|at|@)\s+)?[\w\s]+?)(?:[.|,]|$)/i,
-    // "Partner at X", "Investor at X"
-    /((?:partner|investor|managing\s+director|general\s+partner)(?:\s+(?:at|@)\s+)?@?[\w\s]+?)(?:[.|,]|$)/i,
-  ];
-
-  for (const pattern of rolePatterns) {
-    const match = bio.match(pattern);
-    if (match && match[1]) {
-      let role = match[1].trim();
-      // Clean up @ symbols and extra whitespace
-      role = role.replace(/@/g, '').replace(/\s+/g, ' ').trim();
-      // Capitalize first letter
-      role = role.charAt(0).toUpperCase() + role.slice(1);
-      // Limit length but try to keep it meaningful
-      if (role.length <= 60 && role.length >= 5) {
-        return role;
-      }
-    }
-  }
-
-  // Fallback: Try to build from components
   const lowerBio = bio.toLowerCase();
 
-  // Extract all titles
+  // Extract titles
   const titles = [];
   if (lowerBio.includes('co-founder') || lowerBio.includes('cofounder')) titles.push('Co-founder');
-  if (lowerBio.includes('founder') && !lowerBio.includes('co-founder') && !lowerBio.includes('cofounder')) titles.push('Founder');
-  if (lowerBio.includes('ceo') || lowerBio.includes('chief executive')) titles.push('CEO');
-  if (lowerBio.includes('cto') || lowerBio.includes('chief technology')) titles.push('CTO');
-  if (lowerBio.includes('vp ') || lowerBio.includes('vice president')) titles.push('VP');
+  else if (lowerBio.includes('founder')) titles.push('Founder');
+  if (lowerBio.includes('ceo')) titles.push('CEO');
+  if (lowerBio.includes('cto')) titles.push('CTO');
   if (lowerBio.includes('professor')) titles.push('Professor');
   if (lowerBio.includes('research scientist')) titles.push('Research Scientist');
   else if (lowerBio.includes('researcher')) titles.push('Researcher');
-  if (lowerBio.includes('partner at') || lowerBio.includes('general partner')) titles.push('Partner');
 
-  // Extract company/org names
+  // Extract companies
   const orgPatterns = [
-    /@(OpenAI|Anthropic|Google|DeepMind|Meta|NVIDIA|Microsoft|HuggingFace|Mistral|Cohere|Stability|Tesla|SpaceX|Coinbase|Scale|Databricks|Perplexity)/gi,
-    /\b(OpenAI|Anthropic|Google DeepMind|DeepMind|Meta AI|NVIDIA|Microsoft|Hugging Face|HuggingFace|Mistral AI|Cohere|Stability AI|Tesla|SpaceX|Coinbase|Scale AI|Databricks|Perplexity)\b/gi,
-    /\b(Stanford|MIT|Berkeley|CMU|Carnegie Mellon|Harvard|Oxford|Cambridge|NYU|Princeton|Yale|Cornell)\b/gi,
+    /\b(OpenAI|Anthropic|Google|DeepMind|Meta|NVIDIA|Microsoft|HuggingFace|Mistral|Cohere|Tesla|SpaceX)\b/gi,
+    /\b(Stanford|MIT|Berkeley|CMU|Harvard|Oxford|Cambridge)\b/gi,
   ];
 
   const orgs = [];
@@ -326,32 +255,29 @@ function extractRole(bio, name, username) {
     const matches = bio.match(pattern);
     if (matches) {
       matches.forEach(m => {
-        const cleaned = m.replace('@', '').trim();
+        const cleaned = m.trim();
         if (!orgs.includes(cleaned)) orgs.push(cleaned);
       });
     }
   }
 
-  // Build description
   if (titles.length > 0 && orgs.length > 0) {
-    const titleStr = titles.slice(0, 2).join(' & ');
-    return `${titleStr} at ${orgs[0]}`;
+    return `${titles.slice(0, 2).join(' & ')} at ${orgs[0]}`;
   } else if (titles.length > 0) {
     return titles.slice(0, 2).join(' & ');
   } else if (orgs.length > 0) {
     return orgs[0];
   }
 
-  // Last fallback: first sentence/phrase if short enough
   const firstPart = bio.split(/[|.]/)[0].trim();
-  if (firstPart.length <= 50 && firstPart.length >= 10 && !firstPart.includes('#')) {
+  if (firstPart.length <= 50 && firstPart.length >= 10) {
     return firstPart;
   }
 
   return '';
 }
 
-// Extract bio tags from bio text
+// Extract bio tags
 function extractBioTags(bio) {
   const tags = [];
   const lowerBio = (bio || '').toLowerCase();
@@ -365,13 +291,10 @@ function extractBioTags(bio) {
     ['open source', 'Open Source'], ['research', 'Research'],
     ['startup', 'Startup'], ['founder', 'Founder'],
     ['investor', 'Investor'], ['professor', 'Professor'],
-    ['engineer', 'Engineering'], ['ml', 'ML']
   ];
 
   keywords.forEach(([search, display]) => {
-    if (lowerBio.includes(search)) {
-      tags.push(display);
-    }
+    if (lowerBio.includes(search)) tags.push(display);
   });
 
   return [...new Set(tags)].slice(0, 4);
@@ -408,25 +331,30 @@ function formatUserForGraph(userData) {
   };
 }
 
+// NEW: Calculate ranking score using log(followers) × seeds formula
+function calculateScore(followers, seedCount) {
+  if (followers <= 0 || seedCount <= 0) return 0;
+  return Math.log10(followers) * seedCount;
+}
+
 async function main() {
   console.log('=== AI Influencer Network Crawler ===\n');
+  console.log('Using Twitter API45 via RapidAPI\n');
 
-  const userScores = new Map(); // username -> { score, followedBy, userData }
-  const userIds = new Map(); // username -> rest_id
+  const userScores = new Map(); // username -> { followers, followedBy, userData }
 
-  // Step 1: Get profiles and IDs for seed accounts
+  // Step 1: Get profiles for seed accounts
   console.log('Step 1: Fetching seed account profiles...');
   const seedProfiles = [];
 
   for (const username of SEED_ACCOUNTS) {
     const user = await getUserByUsername(username);
-    if (user && user.rest_id) {
+    if (user && user.status !== 'error' && (user.rest_id || user.profile)) {
       const userData = extractUserData(user);
       if (userData && userData.username) {
-        seedProfiles.push({ username: userData.username, id: user.rest_id, userData });
-        userIds.set(userData.username.toLowerCase(), user.rest_id);
+        seedProfiles.push({ username: userData.username, userData });
         userScores.set(userData.username.toLowerCase(), {
-          score: userData.followers_count || 0,
+          followers: userData.followers_count || 0,
           followedBy: new Set(),
           userData,
           isSeed: true
@@ -442,48 +370,41 @@ async function main() {
 
   for (const seed of seedProfiles) {
     console.log(`  Fetching who @${seed.username} follows...`);
-    const following = await getFollowings(seed.id, 200);
+    const following = await getFollowings(seed.username);
     requestCount++;
 
-    if (following?.result?.timeline?.instructions) {
-      const entries = following.result.timeline.instructions
-        .find(i => i.type === 'TimelineAddEntries')?.entries || [];
+    for (const user of following) {
+      if (!user || !user.screen_name) continue;
 
-      for (const entry of entries) {
-        const userResult = entry?.content?.itemContent?.user_results?.result;
-        if (!userResult || userResult.__typename !== 'User') continue;
+      const userData = extractUserData(user);
+      if (!userData || !userData.username) continue;
 
-        const userData = extractUserData(userResult);
-        if (!userData || !userData.username) continue;
+      const handle = userData.username.toLowerCase();
 
-        const handle = userData.username.toLowerCase();
-        userIds.set(handle, userResult.rest_id);
-
-        if (!userScores.has(handle)) {
-          userScores.set(handle, {
-            score: userData.followers_count || 0,
-            followedBy: new Set(),
-            userData
-          });
-        }
-        userScores.get(handle).followedBy.add(seed.username.toLowerCase());
+      if (!userScores.has(handle)) {
+        userScores.set(handle, {
+          followers: userData.followers_count || 0,
+          followedBy: new Set(),
+          userData
+        });
       }
+      userScores.get(handle).followedBy.add(seed.username.toLowerCase());
     }
   }
   console.log(`  Discovered ${userScores.size} unique accounts (${requestCount} API requests used)\n`);
 
-  // Step 3: Filter for AI-relevance and apply minimum follower threshold
+  // Step 3: Filter for AI-relevance and minimum followers
   console.log('Step 3: Filtering for AI community members...');
   const scoredUsers = [];
   let filteredOutCount = 0;
   let lowFollowerCount = 0;
 
-  const MIN_FOLLOWERS = 25000; // Minimum 25K followers to be considered an "influencer"
+  const MIN_FOLLOWERS = 1000; // Updated: 1K minimum as discussed
 
   for (const [username, data] of userScores) {
     const bio = data.userData?.description || '';
     const name = data.userData?.name || '';
-    const followers = data.score || 0;
+    const followers = data.followers || 0;
 
     // Skip users who aren't AI-relevant (unless they're seeds)
     if (!data.isSeed && !isAIRelevant(bio, name, username)) {
@@ -497,13 +418,18 @@ async function main() {
       continue;
     }
 
-    const connectionScore = data.followedBy.size;
+    const seedCount = data.followedBy.size;
+    // For seeds not followed by other seeds, give them a base seed count of 1
+    const effectiveSeedCount = data.isSeed ? Math.max(seedCount, 1) : seedCount;
+
+    // NEW: Use log(followers) × seeds ranking formula
+    const score = calculateScore(followers, effectiveSeedCount);
 
     scoredUsers.push({
       username,
-      connectionScore,
+      seedCount: effectiveSeedCount,
       followers: followers,
-      finalScore: followers, // Primary ranking by follower count
+      score: score,
       isSeed: data.isSeed || false,
       userData: data.userData,
     });
@@ -513,20 +439,20 @@ async function main() {
   console.log(`  Filtered out ${lowFollowerCount} accounts with < ${MIN_FOLLOWERS.toLocaleString()} followers`);
   console.log(`  ${scoredUsers.length} qualified AI influencers remaining`);
 
-  // Sort by follower count (the true measure of influence)
-  scoredUsers.sort((a, b) => b.followers - a.followers);
+  // Sort by our new score (log(followers) × seeds)
+  scoredUsers.sort((a, b) => b.score - a.score);
 
-  console.log(`\nTop 20 by influence score:`);
+  console.log(`\nTop 20 by influence score (log₁₀(followers) × seeds):`);
   scoredUsers.slice(0, 20).forEach((u, i) => {
-    console.log(`  ${i + 1}. @${u.username} - ${u.followers.toLocaleString()} followers, connected to ${u.connectionScore} seeds`);
+    console.log(`  ${i + 1}. @${u.username} - ${u.followers.toLocaleString()} followers, ${u.seedCount} seeds, score: ${u.score.toFixed(2)}`);
   });
 
-  // Step 4: Take top 100
-  console.log('\nStep 4: Selecting top 100 influencers...');
-  const top100 = scoredUsers.slice(0, 100);
+  // Step 4: Take top 300 (can filter down later when fetching full profiles)
+  console.log('\nStep 4: Selecting top 300 influencers...');
+  const top300 = scoredUsers.slice(0, 300);
   const finalProfiles = [];
 
-  for (const user of top100) {
+  for (const user of top300) {
     const formatted = formatUserForGraph(user.userData);
     if (formatted) {
       finalProfiles.push(formatted);
@@ -565,10 +491,16 @@ async function main() {
   // Step 6: Generate constants.ts
   console.log('Step 6: Generating constants.ts...');
 
+  const now = new Date();
+  const formattedDate = now.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+
   const constantsContent = `import { GraphData } from "./types";
 
-// Auto-generated on ${new Date().toISOString().split('T')[0]}
-// Top 100 AI Influencers based on follower count + network connectivity
+// Auto-generated on ${now.toISOString().split('T')[0]}
+// Top 300 AI Influencers ranked by: log₁₀(followers) × seed_connections
+// Minimum followers: 1,000 | AI-relevance filter: enabled
+
+export const LAST_UPDATED = "${formattedDate}";
 
 export const INITIAL_DATA: GraphData = {
   nodes: ${JSON.stringify(finalProfiles, null, 4)},
@@ -584,6 +516,7 @@ export const INITIAL_DATA: GraphData = {
   console.log(`Total API requests: ~${requestCount}`);
   console.log(`Total influencers: ${finalProfiles.length}`);
   console.log(`Total connections: ${uniqueLinks.length}`);
+  console.log(`\nRanking formula: log₁₀(followers) × seed_connections`);
 }
 
 main().catch(console.error);

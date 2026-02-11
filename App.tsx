@@ -1,8 +1,8 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import Graph3D from './components/Graph3D';
-import { INITIAL_DATA } from './constants';
-import { GraphData, GraphNode, GraphLink } from './types';
-import { X as XIcon, ExternalLink, Building2, Link2, ChevronLeft, ChevronRight, Menu, Calendar, BadgeCheck, MapPin } from 'lucide-react';
+import { INITIAL_DATA, LAST_UPDATED } from './constants';
+import { GraphData, GraphNode } from './types';
+import { X as XIcon, ExternalLink, Building2, Link2, ChevronLeft, ChevronRight, Menu, Calendar, BadgeCheck, MapPin, Search, HelpCircle } from 'lucide-react';
 
 // Creator profile
 const CREATOR_PROFILE: GraphNode = {
@@ -11,23 +11,43 @@ const CREATOR_PROFILE: GraphNode = {
   handle: 'Jenny_the_Bunny',
   group: 'founder',
   role: 'Creator of this page',
-  bio: 'Building cool things with AI. Creator of this AI influencer page. Let\'s be friends on X ~',
+  bio: 'Building cool things with AI. Creator of this AI influencer page. Let\'s be friends on X!',
   joinedDate: 'Mar 2015 but never used until Feb 2026',
   verified: 'blue',
 };
 
 export default function App() {
   const [data] = useState<GraphData>(INITIAL_DATA);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-  
+  const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(window.innerWidth >= 768);
+  const [isLegendOpen, setIsLegendOpen] = useState(true);
+  const [showMethodology, setShowMethodology] = useState(false);
+
   // Selection State
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
-  const [selectedLink, setSelectedLink] = useState<GraphLink | null>(null);
   const [showCreatorCard, setShowCreatorCard] = useState(false);
+
+  // Search State
+  const [searchQuery, setSearchQuery] = useState('');
 
   // Refs for scrolling
   const listContainerRef = useRef<HTMLDivElement>(null);
   const itemRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
+
+  // Handle responsive layout
+  useEffect(() => {
+    const handleResize = () => {
+      const mobile = window.innerWidth < 768;
+      setIsMobile(mobile);
+      // Auto-close sidebar on mobile, auto-open on desktop
+      if (mobile && isSidebarOpen && window.innerWidth < 768) {
+        setIsSidebarOpen(false);
+      }
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   // 1. Calculate Statistics & Sort Nodes by Followers (or connections as fallback)
   const sortedNodes = useMemo(() => {
@@ -49,6 +69,37 @@ export default function App() {
 
   }, [data]);
 
+  // Create a map of node ID to original rank (1-based)
+  const nodeRankMap = useMemo(() => {
+    const map = new Map<string, number>();
+    sortedNodes.forEach((node, idx) => {
+      map.set(node.id, idx + 1);
+    });
+    return map;
+  }, [sortedNodes]);
+
+  // Filter nodes based on search query
+  const filteredNodes = useMemo(() => {
+    if (!searchQuery.trim()) return sortedNodes;
+
+    const query = searchQuery.toLowerCase().trim();
+    return sortedNodes.filter(node => {
+      const name = (node.name || '').toLowerCase();
+      const handle = (node.handle || '').toLowerCase();
+      const role = (node.role || '').toLowerCase();
+      const associated = (node.associated || '').toLowerCase();
+      const bio = (node.bio || '').toLowerCase();
+      const bioTags = ((node as any).bioTags || []).join(' ').toLowerCase();
+
+      return name.includes(query) ||
+             handle.includes(query) ||
+             role.includes(query) ||
+             associated.includes(query) ||
+             bio.includes(query) ||
+             bioTags.includes(query);
+    });
+  }, [sortedNodes, searchQuery]);
+
   // Scroll to selected node in the sidebar
   useEffect(() => {
     if (selectedNode && itemRefs.current.has(selectedNode.id)) {
@@ -60,28 +111,18 @@ export default function App() {
   const nodeCount = data?.nodes?.length || 0;
   const linkCount = data?.links?.length || 0;
 
-  // Helper to safely resolve a link's source/target to a Node object or ID
-  const resolveNode = (nodeRef: string | GraphNode | undefined): GraphNode | undefined => {
-    if (!nodeRef) return undefined;
-    if (typeof nodeRef === 'object' && 'id' in nodeRef) return nodeRef as GraphNode;
-    return data.nodes.find(n => n.id === nodeRef);
-  };
-
   const handleNodeClick = (node: GraphNode) => {
-    setSelectedLink(null);
     setShowCreatorCard(false);
     setSelectedNode(node);
+    // Auto-close sidebar on mobile when selecting a node
+    if (isMobile) {
+      setIsSidebarOpen(false);
+    }
   };
 
-  const handleLinkClick = (link: GraphLink) => {
-    setSelectedNode(null);
-    setShowCreatorCard(false);
-    setSelectedLink(link);
-  };
 
   const closeSelection = () => {
     setSelectedNode(null);
-    setSelectedLink(null);
     setShowCreatorCard(false);
   };
 
@@ -110,27 +151,47 @@ export default function App() {
     <div className="w-full h-screen relative overflow-hidden bg-[#0B0C15] text-white font-sans">
       
       {/* 3D Graph Layer */}
-      <Graph3D 
-        data={data} 
-        onNodeClick={handleNodeClick} 
-        onLinkClick={handleLinkClick} 
+      <Graph3D
+        data={data}
+        onNodeClick={handleNodeClick}
+        onClearSelection={closeSelection}
         selectedNode={selectedNode}
       />
 
       {/* LEFT SIDEBAR - RANKED LIST */}
-      <div 
-        className={`absolute top-0 left-0 h-full bg-[#05060A]/80 backdrop-blur-xl border-r border-white/10 z-30 transition-all duration-300 ease-in-out flex flex-col ${isSidebarOpen ? 'w-80 translate-x-0' : 'w-80 -translate-x-80'}`}
+      <div
+        className={`absolute top-0 left-0 h-full bg-[#05060A]/80 backdrop-blur-xl border-r border-white/10 z-30 transition-all duration-300 ease-in-out flex flex-col ${isMobile ? (isSidebarOpen ? 'w-72 translate-x-0' : 'w-72 -translate-x-72') : (isSidebarOpen ? 'w-80 translate-x-0' : 'w-80 -translate-x-80')}`}
       >
-        <div className="p-6 border-b border-white/10 flex items-center justify-between bg-[#05060A]/50">
-            <div>
-                <h1 className="text-xl font-display font-bold text-white tracking-tight">Top AI Influencers on X</h1>
-                <p className="text-xs text-slate-400 mt-1">Ranked by number of followers</p>
-            </div>
+        <div className="px-4 py-3 border-b border-white/10 bg-[#05060A]/50">
+            <h1 className="text-xl font-display font-bold text-white tracking-tight">Top AI Influencers on X</h1>
+            <p className="text-xs text-slate-400 mt-0.5">Data last updated: {LAST_UPDATED}</p>
+        </div>
+
+        {/* Search Bar */}
+        <div className="p-3 border-b border-white/10">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+            <input
+              type="text"
+              placeholder="Search by name, handle, or role..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-10 pr-4 py-2 bg-slate-800/50 border border-white/10 rounded-lg text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/50"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+              >
+                <XIcon className="w-4 h-4" />
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Scrollable List */}
         <div className="flex-1 overflow-y-auto overflow-x-hidden p-2 custom-scrollbar">
-            {sortedNodes.map((node, idx) => {
+            {filteredNodes.map((node, idx) => {
                 const isSelected = selectedNode?.id === node.id;
                 return (
                     <button
@@ -143,7 +204,7 @@ export default function App() {
                         className={`w-full text-left p-3 rounded-xl mb-1 flex items-center gap-3 transition-all duration-200 border ${isSelected ? 'bg-indigo-600/20 border-indigo-500/50 shadow-lg shadow-indigo-900/20' : 'hover:bg-white/5 border-transparent'}`}
                     >
                         <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${isSelected ? 'bg-indigo-500 text-white' : 'bg-slate-800 text-slate-400'}`}>
-                           {idx + 1}
+                           {nodeRankMap.get(node.id)}
                         </div>
                         <div className="min-w-0 flex-1">
                             <div className="flex items-baseline gap-1.5 truncate">
@@ -157,12 +218,12 @@ export default function App() {
                                 )}
                             </div>
                             <div className="flex items-center justify-between gap-2 mt-0.5">
-                                {node.role && (
-                                    <span className="text-xs text-slate-500 truncate">
-                                        {node.role}{node.associated && node.associated !== node.name ? ` @ ${node.associated}` : ''}
-                                    </span>
-                                )}
-                                <span className="text-[10px] text-slate-600 whitespace-nowrap">
+                                <span className="text-xs text-slate-500 truncate flex-1">
+                                    {node.role
+                                      ? `${node.role}${node.associated && node.associated !== node.name ? ` @ ${node.associated}` : ''}`
+                                      : '\u00A0'}
+                                </span>
+                                <span className="text-[10px] text-slate-600 whitespace-nowrap shrink-0">
                                     {node.followers
                                       ? node.followers >= 1000000
                                         ? `${(node.followers / 1000000).toFixed(1)}M`
@@ -171,21 +232,19 @@ export default function App() {
                                 </span>
                             </div>
                         </div>
-                        {isSelected && <ChevronRight className="w-4 h-4 text-indigo-400" />}
                     </button>
                 )
             })}
         </div>
 
         {/* Creator Profile */}
-        <div className="border-t border-white/10 bg-[#05060A]/50">
+        <div className="border-t border-white/10 bg-[#05060A]/50 p-2">
           <button
             onClick={() => {
               setSelectedNode(null);
-              setSelectedLink(null);
               setShowCreatorCard(true);
             }}
-            className={`w-full text-left p-3 flex items-center gap-3 transition-all duration-200 ${showCreatorCard ? 'bg-indigo-600/20' : 'hover:bg-white/5'}`}
+            className={`w-full text-left p-3 rounded-xl flex items-center gap-3 transition-all duration-200 border ${showCreatorCard ? 'bg-indigo-600/20 border-indigo-500/50' : 'hover:bg-white/5 border-transparent'}`}
           >
             <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${showCreatorCard ? 'bg-indigo-500 text-white' : 'bg-slate-800 text-slate-400'}`}>
               x
@@ -205,7 +264,6 @@ export default function App() {
                 </span>
               </div>
             </div>
-            {showCreatorCard && <ChevronRight className="w-4 h-4 text-indigo-400" />}
           </button>
         </div>
       </div>
@@ -213,15 +271,15 @@ export default function App() {
       {/* Sidebar Toggle Button */}
       <button
         onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-        className={`absolute top-6 z-40 p-2 bg-slate-800/80 text-white border border-white/10 rounded-r-lg hover:bg-slate-700 transition-all duration-300 ${isSidebarOpen ? 'left-80' : 'left-0'}`}
+        className={`absolute top-6 z-40 p-2 bg-slate-800/80 text-white border border-white/10 rounded-r-lg hover:bg-slate-700 transition-all duration-300 ${isMobile ? (isSidebarOpen ? 'left-72' : 'left-0') : (isSidebarOpen ? 'left-80' : 'left-0')}`}
       >
         {isSidebarOpen ? <ChevronLeft className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
       </button>
 
 
       {/* FLOATING DETAILS CARD (Replacing Right Sidebar) */}
-      {(selectedNode || selectedLink || showCreatorCard) && (
-        <div className="fixed top-6 right-6 w-[400px] max-w-[calc(100vw-48px)] z-50 animate-in slide-in-from-right-10 fade-in duration-300 pointer-events-none flex flex-col gap-4">
+      {(selectedNode || showCreatorCard) && (
+        <div className={`fixed z-50 animate-in fade-in duration-300 pointer-events-none flex flex-col gap-4 ${isMobile ? 'bottom-20 left-4 right-4 w-auto' : 'top-6 right-6 w-[400px] max-w-[calc(100vw-48px)] slide-in-from-right-10'}`}>
 
             {/* Creator Card */}
             {showCreatorCard && (
@@ -409,143 +467,19 @@ export default function App() {
                 </>
             )}
 
-            {selectedLink && (() => {
-                const sourceNode = resolveNode(selectedLink.source as string | GraphNode);
-                const targetNode = resolveNode(selectedLink.target as string | GraphNode);
-
-                const renderNodeCard = (node: GraphNode | undefined, label: string) => {
-                    if (!node) return null;
-                    return (
-                        <div className="bg-[#090A10]/95 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl pointer-events-auto relative overflow-hidden group">
-
-                            {/* Header Banner */}
-                            <div className="h-20 bg-gradient-to-br from-indigo-900/50 via-slate-800/50 to-purple-900/30 relative">
-                                <div className="absolute inset-0 bg-gradient-to-t from-[#090A10]/80 to-transparent" />
-                            </div>
-
-                            {/* Close Button */}
-                            <button
-                                onClick={closeSelection}
-                                className="absolute top-3 right-3 p-1.5 bg-black/40 hover:bg-black/60 rounded-full text-white/80 hover:text-white transition-colors z-20 backdrop-blur-sm"
-                            >
-                                <XIcon className="w-4 h-4" />
-                            </button>
-
-                            {/* Profile Section */}
-                            <div className="px-4 pb-4 relative">
-                                {/* Avatar - Overlapping Header */}
-                                <div className="flex justify-between items-start">
-                                    <div className="relative -mt-10 mb-2">
-                                        <img
-                                            src={getProfileImage(node)}
-                                            alt={node.name}
-                                            onError={(e) => {
-                                                e.currentTarget.onerror = null;
-                                                e.currentTarget.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(node.name)}&background=1e293b&color=cbd5e1&size=128`;
-                                            }}
-                                            className="w-16 h-16 rounded-full border-4 border-[#090A10] object-cover bg-slate-800 shadow-lg"
-                                        />
-                                        {node.group === 'company' && (
-                                            <div className="absolute -bottom-1 -right-1 bg-[#090A10] rounded-full p-1">
-                                                <Building2 className="w-3 h-3 text-amber-400" />
-                                            </div>
-                                        )}
-                                    </div>
-
-                                    {/* Follow Button */}
-                                    {node.handle && (
-                                        <a
-                                            href={`https://x.com/${node.handle}`}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            className="mt-2 px-4 py-1.5 bg-white hover:bg-white/90 text-black font-bold text-sm rounded-full transition-all"
-                                        >
-                                            Follow
-                                        </a>
-                                    )}
-                                </div>
-
-                                {/* Name & Handle */}
-                                <div className="mb-2">
-                                    <h2 className="text-lg font-bold text-white flex items-center gap-1.5">
-                                        {node.name}
-                                        {node.verified === 'gold' && <BadgeCheck className="w-4 h-4 text-amber-400 fill-amber-400/20" />}
-                                        {node.verified === 'blue' && <BadgeCheck className="w-4 h-4 text-blue-400 fill-blue-400/20" />}
-                                    </h2>
-                                    <div className="text-slate-500 text-sm">@{node.handle}</div>
-                                </div>
-
-                                {/* Bio */}
-                                {(node.bio || node.role) && (
-                                    <p className="text-sm text-slate-200 leading-relaxed mb-2">
-                                        {node.bio || `${node.role}${node.associated ? ` @ ${node.associated}` : ''}`}
-                                    </p>
-                                )}
-
-                                {/* Meta Info Row */}
-                                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500 mb-3">
-                                    {node.location && (
-                                        <div className="flex items-center gap-1">
-                                            <MapPin className="w-3 h-3" />
-                                            <span>{node.location}</span>
-                                        </div>
-                                    )}
-                                    {node.website && (
-                                        <a
-                                            href={`https://${node.website}`}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            className="flex items-center gap-1 text-indigo-400 hover:underline"
-                                        >
-                                            <Link2 className="w-3 h-3" />
-                                            <span>{node.website}</span>
-                                        </a>
-                                    )}
-                                    {node.joinedDate && (
-                                        <div className="flex items-center gap-1">
-                                            <Calendar className="w-3 h-3" />
-                                            <span>Joined {node.joinedDate}</span>
-                                        </div>
-                                    )}
-                                </div>
-
-                                {/* Following / Followers */}
-                                {(node.followers || node.following) && (
-                                    <div className="flex gap-4 text-sm">
-                                        {node.following !== undefined && (
-                                            <div>
-                                                <span className="font-bold text-white">{formatNumber(node.following)}</span>
-                                                <span className="text-slate-500 ml-1">Following</span>
-                                            </div>
-                                        )}
-                                        {node.followers !== undefined && (
-                                            <div>
-                                                <span className="font-bold text-white">{formatNumber(node.followers)}</span>
-                                                <span className="text-slate-500 ml-1">Followers</span>
-                                            </div>
-                                        )}
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-                    );
-                };
-
-                return (
-                    <>
-                        {renderNodeCard(sourceNode, "Source")}
-                        {renderNodeCard(targetNode, "Target")}
-                    </>
-                );
-            })()}
-
         </div>
       )}
 
       {/* Legend */}
-      <div className="absolute bottom-6 right-6 z-20 bg-[#0B0C15]/80 backdrop-blur-md border border-white/10 rounded-xl p-4">
-        <div className="text-xs text-slate-400 uppercase tracking-wider mb-3 font-medium">Legend</div>
-        <div className="flex flex-col gap-2">
+      <div className={`absolute z-20 bg-[#0B0C15]/80 backdrop-blur-md border border-white/10 rounded-xl transition-all duration-300 ease-in-out ${isMobile ? 'top-4 right-4' : 'bottom-6 right-6'} ${isLegendOpen ? 'p-4' : 'p-2'}`}>
+        <button
+          onClick={() => setIsLegendOpen(!isLegendOpen)}
+          className="flex items-center gap-2 w-full text-left"
+        >
+          <div className="text-xs text-slate-400 uppercase tracking-wider font-medium">Legend</div>
+          <ChevronRight className={`w-3 h-3 text-slate-400 transition-transform duration-300 ${isLegendOpen ? 'rotate-90' : ''}`} />
+        </button>
+        <div className={`flex flex-col gap-2 overflow-hidden transition-all duration-300 ease-in-out ${isLegendOpen ? 'mt-3 max-h-60 opacity-100' : 'max-h-0 opacity-0'}`}>
           <div className="flex items-center gap-2">
             <div className="w-3 h-3 rounded-full bg-[#FFD4A3] shadow-[0_0_8px_#FFD4A3]" />
             <span className="text-xs text-slate-300">Company / Organization</span>
@@ -566,8 +500,97 @@ export default function App() {
             <div className="w-3 h-3 rounded-full bg-[#FFB3D9] shadow-[0_0_8px_#FFB3D9]" />
             <span className="text-xs text-slate-300">Media</span>
           </div>
+          <div className="border-t border-white/10 my-2" />
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] text-slate-400 font-medium">A</span>
+            <div className="w-10 h-0.5 bg-white/30 relative overflow-hidden">
+              <div className="absolute top-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full bg-white/70 animate-[moveRight_1.5s_linear_infinite]" />
+            </div>
+            <span className="text-[10px] text-slate-400 font-medium">B</span>
+            <span className="text-xs text-slate-300 ml-1">A follows B</span>
+          </div>
+          <div className="border-t border-white/10 my-2" />
+          <button
+            onClick={() => setShowMethodology(true)}
+            className="flex items-center gap-1.5 text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
+          >
+            <HelpCircle className="w-3.5 h-3.5" />
+            <span>Methodology</span>
+          </button>
         </div>
       </div>
+
+      {/* Methodology Modal */}
+      {showMethodology && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+          {/* Backdrop */}
+          <div
+            className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+            onClick={() => setShowMethodology(false)}
+          />
+
+          {/* Modal */}
+          <div className="relative bg-[#0B0C15] border border-white/10 rounded-2xl shadow-2xl max-w-lg w-full max-h-[80vh] overflow-y-auto custom-scrollbar">
+            {/* Header */}
+            <div className="sticky top-0 bg-[#0B0C15] border-b border-white/10 px-6 py-4 flex items-center justify-between">
+              <h2 className="text-lg font-bold text-white">Methodology</h2>
+              <button
+                onClick={() => setShowMethodology(false)}
+                className="p-1.5 hover:bg-white/10 rounded-full text-slate-400 hover:text-white transition-colors"
+              >
+                <XIcon className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className="px-6 py-4 space-y-4">
+              {/* Discovery */}
+              <div>
+                <h3 className="text-xs font-semibold text-indigo-400 uppercase tracking-wider mb-1.5">Discovery</h3>
+                <p className="text-sm text-slate-300 leading-relaxed">
+                  Claude Code and I start with <span className="text-white font-medium">seed accounts</span> — major AI companies (OpenAI, Anthropic, DeepMind) and top researchers. We crawl who they follow to find other AI voices. The insight: if multiple trusted sources follow someone, they matter.
+                </p>
+              </div>
+
+              {/* Ranking */}
+              <div>
+                <h3 className="text-xs font-semibold text-indigo-400 uppercase tracking-wider mb-1.5">Ranking</h3>
+                <div className="bg-slate-800/50 border border-white/10 rounded-lg px-3 py-2 font-mono text-sm text-white mb-2">
+                  Score = log<sub>10</sub>(followers) x seed_connections
+                </div>
+                <p className="text-sm text-slate-400">
+                  The log scale prevents mega-accounts from dominating (1M vs 100K becomes 6 vs 5). Seed connections reward community recognition — being followed by 5 AI labs matters more than raw follower count.
+                </p>
+              </div>
+
+              {/* Filters */}
+              <div>
+                <h3 className="text-xs font-semibold text-indigo-400 uppercase tracking-wider mb-1.5">Filters</h3>
+                <ul className="text-sm text-slate-300 space-y-1">
+                  <li><span className="text-indigo-400">•</span> <span className="text-white">Min 1K followers</span> — removes inactive accounts</li>
+                  <li><span className="text-indigo-400">•</span> <span className="text-white">AI keywords in bio</span> — ensures relevance</li>
+                  <li><span className="text-indigo-400">•</span> <span className="text-white">Blocklist</span> — excludes general media outlets</li>
+                </ul>
+              </div>
+
+              {/* Feedback */}
+              <div className="pt-3 border-t border-white/10">
+                <p className="text-xs text-slate-400">
+                  This methodology may not be perfect. Have ideas?{' '}
+                  <a
+                    href="https://x.com/Jenny_the_Bunny"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-indigo-400 hover:text-indigo-300"
+                  >
+                    Hit me up on X
+                  </a>
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <style>{`
         .custom-scrollbar::-webkit-scrollbar {
@@ -582,6 +605,10 @@ export default function App() {
         }
         .custom-scrollbar::-webkit-scrollbar-thumb:hover {
           background: rgba(255, 255, 255, 0.2);
+        }
+        @keyframes moveRight {
+          0% { left: -6px; }
+          100% { left: calc(100% + 6px); }
         }
       `}</style>
     </div>

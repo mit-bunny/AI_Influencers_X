@@ -2,20 +2,57 @@ import React, { useRef, useMemo, useCallback, useState, useEffect } from 'react'
 import ForceGraph3D, { ForceGraphMethods } from 'react-force-graph-3d';
 import * as THREE from 'three';
 import { CSS2DRenderer, CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
-import { GraphData, GraphNode, GraphLink } from '../types';
+import { GraphData, GraphNode } from '../types';
 
 interface Graph3DProps {
   data: GraphData;
   onNodeClick: (node: GraphNode) => void;
-  onLinkClick: (link: GraphLink) => void;
+  onClearSelection: () => void;
   selectedNode?: GraphNode | null;
 }
 
-const Graph3D: React.FC<Graph3DProps> = ({ data, onNodeClick, onLinkClick, selectedNode }) => {
+const Graph3D: React.FC<Graph3DProps> = ({ data, onNodeClick, onClearSelection, selectedNode }) => {
   const graphRef = useRef<ForceGraphMethods>(null);
-  const [hoveredLink, setHoveredLink] = useState<GraphLink | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const labelsRef = useRef<Map<string, { element: HTMLDivElement; object: THREE.Object3D }>>(new Map());
-  const materialsRef = useRef<Map<string, THREE.MeshLambertMaterial>>(new Map());
+  const materialsRef = useRef<Map<string, THREE.MeshBasicMaterial[]>>(new Map());
+
+  // Track container dimensions for responsive sizing
+  const [dimensions, setDimensions] = useState({ width: window.innerWidth, height: window.innerHeight });
+
+  // Handle window resize
+  useEffect(() => {
+    const handleResize = () => {
+      if (containerRef.current) {
+        setDimensions({
+          width: containerRef.current.clientWidth,
+          height: containerRef.current.clientHeight
+        });
+      } else {
+        setDimensions({
+          width: window.innerWidth,
+          height: window.innerHeight
+        });
+      }
+    };
+
+    // Initial size
+    handleResize();
+
+    // Listen for resize
+    window.addEventListener('resize', handleResize);
+
+    // Also use ResizeObserver for more accurate container tracking
+    const resizeObserver = new ResizeObserver(handleResize);
+    if (containerRef.current) {
+      resizeObserver.observe(containerRef.current);
+    }
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      resizeObserver.disconnect();
+    };
+  }, []);
 
   // Process data: Clean links, calculate degrees, and filter disconnected nodes
   const processedData = useMemo(() => {
@@ -93,6 +130,8 @@ const Graph3D: React.FC<Graph3DProps> = ({ data, onNodeClick, onLinkClick, selec
     return { nodes: connectedNodes, links: finalLinks };
   }, [data]);
 
+
+
   // Identify connected neighbors for the selected node
   const neighborIds = useMemo(() => {
     const ids = new Set<string>();
@@ -109,13 +148,27 @@ const Graph3D: React.FC<Graph3DProps> = ({ data, onNodeClick, onLinkClick, selec
   }, [selectedNode, processedData]);
 
 
-  // Adjust Physics Forces
+  // Adjust Physics Forces with max-distance constraint
   useEffect(() => {
     const fg = graphRef.current;
     if (fg) {
-      fg.d3Force('charge')?.strength(-1000);
-      fg.d3Force('link')?.distance(35);
-      fg.d3Force('center')?.strength(1.2);
+      fg.d3Force('charge')?.strength(-500);
+      fg.d3Force('link')?.distance(28);
+      fg.d3Force('center')?.strength(1.5);
+
+      // Custom force to constrain max distance from center
+      const MAX_DISTANCE = 400;
+      fg.d3Force('boundingSphere', () => {
+        processedData.nodes.forEach((node: any) => {
+          const dist = Math.sqrt((node.x || 0) ** 2 + (node.y || 0) ** 2 + (node.z || 0) ** 2);
+          if (dist > MAX_DISTANCE) {
+            const scale = MAX_DISTANCE / dist;
+            node.x = (node.x || 0) * scale;
+            node.y = (node.y || 0) * scale;
+            node.z = (node.z || 0) * scale;
+          }
+        });
+      });
     }
   }, [processedData]);
 
@@ -180,24 +233,48 @@ const Graph3D: React.FC<Graph3DProps> = ({ data, onNodeClick, onLinkClick, selec
     return 4;
   }, []);
 
-  // Create node with sphere and HTML text label
+  // Create node with glowing sphere (multiple layers) and HTML text label
   const nodeThreeObject = useCallback((node: any) => {
     const group = new THREE.Group();
 
-    // Create sphere
     const nodeSize = getNodeSize(node);
     const baseColor = getCategoryColor(node.group || 'company');
-    const geometry = new THREE.SphereGeometry(nodeSize, 16, 16);
-    const material = new THREE.MeshLambertMaterial({
+
+    // Create glow using many layered transparent spheres
+    const glowMaterials: THREE.MeshBasicMaterial[] = [];
+    const numLayers = 20;
+
+    for (let i = numLayers - 1; i >= 0; i--) {
+      const t = i / numLayers; // 1 to 0 (outside to inside)
+      const scale = 1.0 + (t * 1.2); // 1.0 to 2.2 (smaller glow)
+      // Smooth cubic falloff for opacity
+      const opacity = 0.05 + (Math.pow(1 - t, 3) * 0.4);
+
+      const layerGeometry = new THREE.SphereGeometry(nodeSize * scale, 24, 24);
+      const layerMaterial = new THREE.MeshBasicMaterial({
+        color: baseColor,
+        transparent: true,
+        opacity: opacity,
+        depthWrite: false,
+      });
+      const layerMesh = new THREE.Mesh(layerGeometry, layerMaterial);
+      group.add(layerMesh);
+      glowMaterials.push(layerMaterial);
+    }
+
+    // Bigger bright core
+    const coreGeometry = new THREE.SphereGeometry(nodeSize * 0.85, 20, 20);
+    const coreMaterial = new THREE.MeshBasicMaterial({
       color: baseColor,
       transparent: true,
-      opacity: 0.9
+      opacity: 0.95
     });
-    const sphere = new THREE.Mesh(geometry, material);
-    group.add(sphere);
+    const core = new THREE.Mesh(coreGeometry, coreMaterial);
+    group.add(core);
+    glowMaterials.push(coreMaterial);
 
-    // Store material reference for dynamic color updates
-    materialsRef.current.set(node.id, material);
+    // Store all materials for dynamic color updates
+    (materialsRef.current as any).set(node.id, glowMaterials);
 
     // Create HTML text label
     const labelDiv = document.createElement('div');
@@ -281,70 +358,47 @@ const Graph3D: React.FC<Graph3DProps> = ({ data, onNodeClick, onLinkClick, selec
 
   // Update node colors when selection changes
   useEffect(() => {
-    materialsRef.current.forEach((material, nodeId) => {
-      // Find the node to get its group/category
+    materialsRef.current.forEach((materials: any, nodeId) => {
       const node = processedData.nodes.find(n => n.id === nodeId);
       if (!node) return;
 
       const baseColor = getCategoryColor(node.group || 'company');
+      const materialsArray = Array.isArray(materials) ? materials : [materials];
+      const isHighlighted = !selectedNode || nodeId === selectedNode.id || neighborIds.has(nodeId);
 
-      if (selectedNode) {
-        if (nodeId === selectedNode.id || neighborIds.has(nodeId)) {
-          // Selected or neighbor: full color
-          material.color.set(baseColor);
-          material.opacity = 0.9;
+      materialsArray.forEach((mat: THREE.MeshBasicMaterial, index: number) => {
+        if (isHighlighted) {
+          mat.color.set(baseColor);
         } else {
-          // Not connected: dim gray
-          material.color.set('#333333');
-          material.opacity = 0.5;
+          mat.color.set('#222222');
         }
-      } else {
-        // No selection: show category color
-        material.color.set(baseColor);
-        material.opacity = 0.9;
-      }
+      });
     });
   }, [selectedNode, neighborIds, processedData.nodes, getCategoryColor]);
 
-  // Helper to safely get node ID from link end
-  const getLinkId = (nodeOrId: any): string | null => {
-      if (!nodeOrId) return null;
-      if (typeof nodeOrId === 'string') return nodeOrId;
-      if (typeof nodeOrId === 'object' && 'id' in nodeOrId) return String(nodeOrId.id);
-      return null;
-  };
+  // Link visibility - only show links connected to selected node (or all if none selected)
+  const getLinkVisibility = useCallback((link: any) => {
+    if (!selectedNode) return true; // Show all links when nothing selected
 
+    const sId = typeof link.source === 'object' ? link.source.id : link.source;
+    const tId = typeof link.target === 'object' ? link.target.id : link.target;
+
+    // Only show links that connect to the selected node
+    return sId === selectedNode.id || tId === selectedNode.id;
+  }, [selectedNode]);
+
+  // Link color - white with transparency
   const getLinkColor = useCallback((link: any) => {
-     if (!link) return "rgba(180, 180, 190, 0.2)";
+    if (!selectedNode) return 'rgba(255, 255, 255, 0.15)';
 
-     const sId = getLinkId(link.source);
-     const tId = getLinkId(link.target);
-     const selId = selectedNode?.id;
+    const sId = typeof link.source === 'object' ? link.source.id : link.source;
+    const tId = typeof link.target === 'object' ? link.target.id : link.target;
 
-     if (link === hoveredLink) return "rgba(150, 200, 255, 0.8)";
-
-     if (selId && (sId === selId || tId === selId)) {
-         return "rgba(130, 180, 255, 0.6)";
-     }
-
-     if (selId) {
-         return "rgba(150, 150, 160, 0.08)";
-     }
-
-     return "rgba(180, 180, 190, 0.25)";
-  }, [hoveredLink, selectedNode]);
-
-  const getLinkWidth = useCallback((link: any) => {
-      if (link === hoveredLink) return 1.5;
-
-      const sId = getLinkId(link.source);
-      const tId = getLinkId(link.target);
-      const selId = selectedNode?.id;
-
-      if (selId && (sId === selId || tId === selId)) return 1;
-
-      return 0.4;
-  }, [hoveredLink, selectedNode]);
+    if (sId === selectedNode.id || tId === selectedNode.id) {
+      return 'rgba(255, 255, 255, 0.4)'; // Brighter for connected links
+    }
+    return 'rgba(255, 255, 255, 0.15)';
+  }, [selectedNode]);
 
   // Zoom controls
   const handleZoomIn = useCallback(() => {
@@ -380,12 +434,13 @@ const Graph3D: React.FC<Graph3DProps> = ({ data, onNodeClick, onLinkClick, selec
   const handleResetView = useCallback(() => {
     const fg = graphRef.current;
     if (fg) {
-      fg.zoomToFit(500, 5); // 500ms animation, 5px padding
+      fg.zoomToFit(500, 100); // 500ms animation, positive padding = more zoomed out
     }
-  }, []);
+    onClearSelection(); // Clear any selected node
+  }, [onClearSelection]);
 
   return (
-    <div className="absolute inset-0 z-0 bg-[#0B0C15]">
+    <div ref={containerRef} className="absolute inset-0 z-0 bg-[#0B0C15]">
       {/* Zoom Controls - bottom center, horizontal */}
       <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-50 flex flex-row bg-black/40 backdrop-blur-md rounded-lg border border-white/10 overflow-hidden">
         <button
@@ -419,23 +474,37 @@ const Graph3D: React.FC<Graph3DProps> = ({ data, onNodeClick, onLinkClick, selec
         graphData={processedData}
         nodeId="id"
         nodeLabel=""
+        width={dimensions.width}
+        height={dimensions.height}
         backgroundColor="#0B0C15"
         extraRenderers={extraRenderers}
 
         // Custom node with sphere and label
         nodeThreeObject={nodeThreeObject}
 
-        // Link Styling
+        // Link Styling - Simple white lines with visibility control
+        linkVisibility={getLinkVisibility}
         linkColor={getLinkColor}
-        linkWidth={getLinkWidth}
+        linkWidth={1}
         linkOpacity={1}
         linkDirectionalParticles={0}
+
+        // Animated particles only on selected node's edges
+        linkDirectionalParticles={(link: any) => {
+          if (!selectedNode) return 0;
+          const sId = typeof link.source === 'object' ? link.source.id : link.source;
+          const tId = typeof link.target === 'object' ? link.target.id : link.target;
+          return (sId === selectedNode.id || tId === selectedNode.id) ? 2 : 0;
+        }}
+        linkDirectionalParticleWidth={1.5}
+        linkDirectionalParticleSpeed={0.006}
+        linkDirectionalParticleColor={() => 'rgba(255, 255, 255, 0.5)'}
 
         // Interaction
         enableNodeDrag={true}
         onNodeClick={(node) => node && onNodeClick(node)}
-        onLinkClick={(link) => link && onLinkClick(link as GraphLink)}
-        onLinkHover={(link) => setHoveredLink(link as GraphLink | null)}
+        enablePointerInteraction={true}
+        linkHoverPrecision={0}
 
         // Physics
         d3VelocityDecay={0.4}
