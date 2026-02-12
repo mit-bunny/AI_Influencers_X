@@ -9,9 +9,10 @@ interface Graph3DProps {
   onNodeClick: (node: GraphNode) => void;
   onClearSelection: () => void;
   selectedNode?: GraphNode | null;
+  keepOrphans?: boolean;
 }
 
-const Graph3D: React.FC<Graph3DProps> = ({ data, onNodeClick, onClearSelection, selectedNode }) => {
+const Graph3D: React.FC<Graph3DProps> = ({ data, onNodeClick, onClearSelection, selectedNode, keepOrphans = false }) => {
   const graphRef = useRef<ForceGraphMethods>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const labelsRef = useRef<Map<string, { element: HTMLDivElement; object: THREE.Object3D }>>(new Map());
@@ -111,24 +112,22 @@ const Graph3D: React.FC<Graph3DProps> = ({ data, onNodeClick, onClearSelection, 
         degrees.set(link.target, (degrees.get(link.target) || 0) + 1);
     });
 
-    // 4. Filter Orphaned Nodes
-    const connectedNodes = Array.from(uniqueNodesMap.values())
-        .filter(n => {
-            const degree = degrees.get(n.id) || 0;
-            return degree > 0;
-        });
+    // 4. Filter Orphaned Nodes (skip when keepOrphans is true, e.g. category filter)
+    const filteredNodes = keepOrphans
+        ? Array.from(uniqueNodesMap.values())
+        : Array.from(uniqueNodesMap.values()).filter(n => (degrees.get(n.id) || 0) > 0);
 
     // 5. Update values (degree) on the node objects
-    connectedNodes.forEach(n => {
+    filteredNodes.forEach(n => {
        n.val = degrees.get(n.id) || 0;
     });
 
     // 6. Ensure returned links strictly reference returned nodes
-    const finalNodeIds = new Set(connectedNodes.map(n => n.id));
+    const finalNodeIds = new Set(filteredNodes.map(n => n.id));
     const finalLinks = validLinks.filter(l => finalNodeIds.has(l.source) && finalNodeIds.has(l.target));
 
-    return { nodes: connectedNodes, links: finalLinks };
-  }, [data]);
+    return { nodes: filteredNodes, links: finalLinks };
+  }, [data, keepOrphans]);
 
 
 
@@ -141,8 +140,8 @@ const Graph3D: React.FC<Graph3DProps> = ({ data, onNodeClick, onClearSelection, 
        const sId = typeof link.source === 'object' ? link.source.id : link.source;
        const tId = typeof link.target === 'object' ? link.target.id : link.target;
 
+       // Only highlight nodes that the selected node follows
        if (sId === selectedNode.id) ids.add(String(tId));
-       if (tId === selectedNode.id) ids.add(String(sId));
     });
     return ids;
   }, [selectedNode, processedData]);
@@ -152,12 +151,12 @@ const Graph3D: React.FC<Graph3DProps> = ({ data, onNodeClick, onClearSelection, 
   useEffect(() => {
     const fg = graphRef.current;
     if (fg) {
-      fg.d3Force('charge')?.strength(-500);
-      fg.d3Force('link')?.distance(28);
-      fg.d3Force('center')?.strength(1.5);
+      fg.d3Force('charge')?.strength(-800);
+      fg.d3Force('link')?.distance(50);
+      fg.d3Force('center')?.strength(1.2);
 
       // Custom force to constrain max distance from center
-      const MAX_DISTANCE = 400;
+      const MAX_DISTANCE = 600;
       fg.d3Force('boundingSphere', () => {
         processedData.nodes.forEach((node: any) => {
           const dist = Math.sqrt((node.x || 0) ** 2 + (node.y || 0) ** 2 + (node.z || 0) ** 2);
@@ -224,13 +223,15 @@ const Graph3D: React.FC<Graph3DProps> = ({ data, onNodeClick, onClearSelection, 
     return baseColor;
   }, [selectedNode, neighborIds, getCategoryColor]);
 
-  // Node size based on connections
+  // Node size based on follower count
   const getNodeSize = useCallback((node: any) => {
-    const val = node.val || 1;
-    if (val > 10) return 12;
-    if (val > 5) return 9;
-    if (val > 2) return 6;
-    return 4;
+    const followers = node.followers || 0;
+    if (followers >= 1000000) return 8;   // 1M+
+    if (followers >= 500000) return 6.5;  // 500K+
+    if (followers >= 100000) return 5;    // 100K+
+    if (followers >= 50000) return 4;     // 50K+
+    if (followers >= 10000) return 3.5;   // 10K+
+    return 3;
   }, []);
 
   // Create node with glowing sphere (multiple layers) and HTML text label
@@ -376,28 +377,19 @@ const Graph3D: React.FC<Graph3DProps> = ({ data, onNodeClick, onClearSelection, 
     });
   }, [selectedNode, neighborIds, processedData.nodes, getCategoryColor]);
 
-  // Link visibility - only show links connected to selected node (or all if none selected)
+  // Link visibility - show all when nothing selected, only outgoing when a node is selected
   const getLinkVisibility = useCallback((link: any) => {
-    if (!selectedNode) return true; // Show all links when nothing selected
+    if (!selectedNode) return true;
 
     const sId = typeof link.source === 'object' ? link.source.id : link.source;
-    const tId = typeof link.target === 'object' ? link.target.id : link.target;
 
-    // Only show links that connect to the selected node
-    return sId === selectedNode.id || tId === selectedNode.id;
+    return sId === selectedNode.id;
   }, [selectedNode]);
 
-  // Link color - white with transparency
+  // Link color - dimmer when showing all, brighter for selected node's links
   const getLinkColor = useCallback((link: any) => {
-    if (!selectedNode) return 'rgba(255, 255, 255, 0.15)';
-
-    const sId = typeof link.source === 'object' ? link.source.id : link.source;
-    const tId = typeof link.target === 'object' ? link.target.id : link.target;
-
-    if (sId === selectedNode.id || tId === selectedNode.id) {
-      return 'rgba(255, 255, 255, 0.4)'; // Brighter for connected links
-    }
-    return 'rgba(255, 255, 255, 0.15)';
+    if (!selectedNode) return 'rgba(255, 255, 255, 0.07)';
+    return 'rgba(255, 255, 255, 0.4)';
   }, [selectedNode]);
 
   // Zoom controls
@@ -488,17 +480,6 @@ const Graph3D: React.FC<Graph3DProps> = ({ data, onNodeClick, onClearSelection, 
         linkWidth={1}
         linkOpacity={1}
         linkDirectionalParticles={0}
-
-        // Animated particles only on selected node's edges
-        linkDirectionalParticles={(link: any) => {
-          if (!selectedNode) return 0;
-          const sId = typeof link.source === 'object' ? link.source.id : link.source;
-          const tId = typeof link.target === 'object' ? link.target.id : link.target;
-          return (sId === selectedNode.id || tId === selectedNode.id) ? 2 : 0;
-        }}
-        linkDirectionalParticleWidth={1.5}
-        linkDirectionalParticleSpeed={0.006}
-        linkDirectionalParticleColor={() => 'rgba(255, 255, 255, 0.5)'}
 
         // Interaction
         enableNodeDrag={true}

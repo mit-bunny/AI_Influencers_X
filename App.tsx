@@ -27,8 +27,9 @@ export default function App() {
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
   const [showCreatorCard, setShowCreatorCard] = useState(false);
 
-  // Search State
+  // Search & Filter State
   const [searchQuery, setSearchQuery] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
 
   // Refs for scrolling
   const listContainerRef = useRef<HTMLDivElement>(null);
@@ -78,27 +79,53 @@ export default function App() {
     return map;
   }, [sortedNodes]);
 
-  // Filter nodes based on search query
+  // Filter nodes based on search query and selected category
   const filteredNodes = useMemo(() => {
-    if (!searchQuery.trim()) return sortedNodes;
+    let nodes = sortedNodes;
 
-    const query = searchQuery.toLowerCase().trim();
-    return sortedNodes.filter(node => {
-      const name = (node.name || '').toLowerCase();
-      const handle = (node.handle || '').toLowerCase();
-      const role = (node.role || '').toLowerCase();
-      const associated = (node.associated || '').toLowerCase();
-      const bio = (node.bio || '').toLowerCase();
-      const bioTags = ((node as any).bioTags || []).join(' ').toLowerCase();
+    if (selectedCategory) {
+      nodes = nodes.filter(node => node.group === selectedCategory);
+    }
 
-      return name.includes(query) ||
-             handle.includes(query) ||
-             role.includes(query) ||
-             associated.includes(query) ||
-             bio.includes(query) ||
-             bioTags.includes(query);
-    });
-  }, [sortedNodes, searchQuery]);
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase().trim();
+      nodes = nodes.filter(node => {
+        const name = (node.name || '').toLowerCase();
+        const handle = (node.handle || '').toLowerCase();
+        const role = (node.role || '').toLowerCase();
+        const associated = (node.associated || '').toLowerCase();
+        const bio = (node.bio || '').toLowerCase();
+        const bioTags = ((node as any).bioTags || []).join(' ').toLowerCase();
+
+        return name.includes(query) ||
+               handle.includes(query) ||
+               role.includes(query) ||
+               associated.includes(query) ||
+               bio.includes(query) ||
+               bioTags.includes(query);
+      });
+    }
+
+    return nodes;
+  }, [sortedNodes, searchQuery, selectedCategory]);
+
+  // Build filtered graph data for the 3D view when a category is selected
+  const filteredGraphData = useMemo(() => {
+    if (!selectedCategory) return data;
+
+    const filteredNodeIds = new Set(
+      data.nodes.filter(n => n.group === selectedCategory).map(n => n.id)
+    );
+
+    return {
+      nodes: data.nodes.filter(n => filteredNodeIds.has(n.id)),
+      links: data.links.filter(link => {
+        const sId = typeof link.source === 'object' ? (link.source as any).id : link.source;
+        const tId = typeof link.target === 'object' ? (link.target as any).id : link.target;
+        return filteredNodeIds.has(sId) && filteredNodeIds.has(tId);
+      }),
+    };
+  }, [data, selectedCategory]);
 
   // Scroll to selected node in the sidebar
   useEffect(() => {
@@ -113,6 +140,10 @@ export default function App() {
 
   const handleNodeClick = (node: GraphNode) => {
     setShowCreatorCard(false);
+    if (selectedNode?.id === node.id) {
+      setSelectedNode(null);
+      return;
+    }
     setSelectedNode(node);
     // Auto-close sidebar on mobile when selecting a node
     if (isMobile) {
@@ -122,6 +153,12 @@ export default function App() {
 
 
   const closeSelection = () => {
+    setSelectedNode(null);
+    setShowCreatorCard(false);
+  };
+
+  const handleCategoryClick = (category: string) => {
+    setSelectedCategory(prev => prev === category ? null : category);
     setSelectedNode(null);
     setShowCreatorCard(false);
   };
@@ -152,10 +189,11 @@ export default function App() {
       
       {/* 3D Graph Layer */}
       <Graph3D
-        data={data}
+        data={filteredGraphData}
         onNodeClick={handleNodeClick}
         onClearSelection={closeSelection}
         selectedNode={selectedNode}
+        keepOrphans={!!selectedCategory}
       />
 
       {/* LEFT SIDEBAR - RANKED LIST */}
@@ -479,36 +517,31 @@ export default function App() {
           <div className="text-xs text-slate-400 uppercase tracking-wider font-medium">Legend</div>
           <ChevronRight className={`w-3 h-3 text-slate-400 transition-transform duration-300 ${isLegendOpen ? 'rotate-90' : ''}`} />
         </button>
-        <div className={`flex flex-col gap-2 overflow-hidden transition-all duration-300 ease-in-out ${isLegendOpen ? 'mt-3 max-h-60 opacity-100' : 'max-h-0 opacity-0'}`}>
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full bg-[#FFD4A3] shadow-[0_0_8px_#FFD4A3]" />
-            <span className="text-xs text-slate-300">Company / Organization</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full bg-[#A3D4FF] shadow-[0_0_8px_#A3D4FF]" />
-            <span className="text-xs text-slate-300">Founder / Builder</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full bg-[#E0B3FF] shadow-[0_0_8px_#E0B3FF]" />
-            <span className="text-xs text-slate-300">Researcher / Academia</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full bg-[#B3FFB3] shadow-[0_0_8px_#B3FFB3]" />
-            <span className="text-xs text-slate-300">Investor</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full bg-[#FFB3D9] shadow-[0_0_8px_#FFB3D9]" />
-            <span className="text-xs text-slate-300">Media</span>
-          </div>
-          <div className="border-t border-white/10 my-2" />
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] text-slate-400 font-medium">A</span>
-            <div className="w-10 h-0.5 bg-white/30 relative overflow-hidden">
-              <div className="absolute top-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full bg-white/70 animate-[moveRight_1.5s_linear_infinite]" />
-            </div>
-            <span className="text-[10px] text-slate-400 font-medium">B</span>
-            <span className="text-xs text-slate-300 ml-1">A follows B</span>
-          </div>
+        <div className={`flex flex-col gap-1 overflow-hidden transition-all duration-300 ease-in-out ${isLegendOpen ? 'mt-3 max-h-60 opacity-100' : 'max-h-0 opacity-0'}`}>
+          {[
+            { key: 'company', color: '#FFD4A3', label: 'Company / Organization' },
+            { key: 'founder', color: '#A3D4FF', label: 'Founder / Builder' },
+            { key: 'researcher', color: '#E0B3FF', label: 'Researcher / Academia' },
+            { key: 'investor', color: '#B3FFB3', label: 'Investor' },
+            { key: 'media', color: '#FFB3D9', label: 'Media' },
+          ].map(cat => (
+            <button
+              key={cat.key}
+              onClick={() => handleCategoryClick(cat.key)}
+              className={`flex items-center gap-2 px-2 py-1 rounded-md transition-all duration-200 text-left ${selectedCategory === cat.key ? 'bg-white/10 ring-1 ring-white/20' : 'hover:bg-white/5'} ${selectedCategory && selectedCategory !== cat.key ? 'opacity-40' : 'opacity-100'}`}
+            >
+              <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: cat.color, boxShadow: `0 0 8px ${cat.color}` }} />
+              <span className="text-xs text-slate-300">{cat.label}</span>
+            </button>
+          ))}
+          {selectedCategory && (
+            <button
+              onClick={() => { setSelectedCategory(null); setSelectedNode(null); }}
+              className="text-[10px] text-indigo-400 hover:text-indigo-300 transition-colors mt-1 px-2"
+            >
+              Clear filter
+            </button>
+          )}
           <div className="border-t border-white/10 my-2" />
           <button
             onClick={() => setShowMethodology(true)}
@@ -543,38 +576,28 @@ export default function App() {
             </div>
 
             {/* Content */}
-            <div className="px-6 py-4 space-y-4">
-              {/* Discovery */}
+            <div className="px-5 py-3 space-y-2.5">
               <div>
-                <h3 className="text-xs font-semibold text-indigo-400 uppercase tracking-wider mb-1.5">Discovery</h3>
-                <p className="text-sm text-slate-300 leading-relaxed">
-                  Claude Code and I start with <span className="text-white font-medium">seed accounts</span> — major AI companies (OpenAI, Anthropic, DeepMind) and top researchers. We crawl who they follow to find other AI voices. The insight: if multiple trusted sources follow someone, they matter.
+                <h3 className="text-xs font-semibold text-indigo-400 uppercase tracking-wider mb-1">Discovery & Selection</h3>
+                <p className="text-xs text-slate-300 leading-relaxed">
+                  Starting from <span className="text-white font-medium">seed accounts</span> (OpenAI, Anthropic, DeepMind, top researchers), we crawl who they follow to find AI voices. If multiple trusted sources follow someone, they matter. The top 300 are selected using:
                 </p>
-              </div>
-
-              {/* Ranking */}
-              <div>
-                <h3 className="text-xs font-semibold text-indigo-400 uppercase tracking-wider mb-1.5">Ranking</h3>
-                <div className="bg-slate-800/50 border border-white/10 rounded-lg px-3 py-2 font-mono text-sm text-white mb-2">
+                <div className="bg-slate-800/50 border border-white/10 rounded-md px-2.5 py-1.5 font-mono text-xs text-white mt-1.5 mb-1">
                   Score = log<sub>10</sub>(followers) x seed_connections
                 </div>
-                <p className="text-sm text-slate-400">
-                  The log scale prevents mega-accounts from dominating (1M vs 100K becomes 6 vs 5). Seed connections reward community recognition — being followed by 5 AI labs matters more than raw follower count.
+                <p className="text-xs text-slate-400">
+                  Log scale prevents mega-accounts from dominating. Minimum 1K followers, AI keywords in bio, blocklist for general media.
                 </p>
               </div>
 
-              {/* Filters */}
               <div>
-                <h3 className="text-xs font-semibold text-indigo-400 uppercase tracking-wider mb-1.5">Filters</h3>
-                <ul className="text-sm text-slate-300 space-y-1">
-                  <li><span className="text-indigo-400">•</span> <span className="text-white">Min 1K followers</span> — removes inactive accounts</li>
-                  <li><span className="text-indigo-400">•</span> <span className="text-white">AI keywords in bio</span> — ensures relevance</li>
-                  <li><span className="text-indigo-400">•</span> <span className="text-white">Blocklist</span> — excludes general media outlets</li>
-                </ul>
+                <h3 className="text-xs font-semibold text-indigo-400 uppercase tracking-wider mb-1">Graph & Connections</h3>
+                <p className="text-xs text-slate-300 leading-relaxed">
+                  The default view shows all connections. <span className="text-white font-medium">Click a node</span> to see who they follow. Node sizes reflect followers. Filter by category using the legend.
+                </p>
               </div>
 
-              {/* Feedback */}
-              <div className="pt-3 border-t border-white/10">
+              <div className="pt-2 border-t border-white/10">
                 <p className="text-xs text-slate-400">
                   This methodology may not be perfect. Have ideas?{' '}
                   <a
