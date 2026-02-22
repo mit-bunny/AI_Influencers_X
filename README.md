@@ -8,7 +8,7 @@ An interactive 3D map of the top AI influencers on X (Twitter) — explore who t
 
 ## 🌐 Live Site
 
-**[ai.studio/apps/drive/1_bl8LoxyPW4JMVZdGZcGMX585rzCq_oL](https://ai.studio/apps/drive/1_bl8LoxyPW4JMVZdGZcGMX585rzCq_oL)**
+**[x.mitbunny.ai](https://x.mitbunny.ai)**
 
 ---
 
