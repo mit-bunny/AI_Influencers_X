@@ -14,7 +14,7 @@ An interactive 3D map of the top AI influencers on X (Twitter) — explore who t
 
 ## 💡 Why I Built This
 
-The AI space on X moves fast, and it's hard to know who the key voices are — or how they're all connected. I built this to give anyone a visual, explorable map of the top 300 AI influencers: founders, researchers, investors, and media personalities. The goal is to make it easy to discover who's worth following and to see the network of relationships that shapes the AI conversation online.
+There are millions of pieces of AI news and information generated every second on X — and for new users, it can get really overwhelming. To figure out which accounts were actually worth following, and to visualize what the AI community on X actually looks like, I built this 3D interactive platform. It's a tool for anyone trying to navigate the AI space and find their footing in it.
 
 ---
 
